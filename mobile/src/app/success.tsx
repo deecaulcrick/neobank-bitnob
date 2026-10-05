@@ -1,4 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
+import { Check, X } from 'lucide-react-native';
 import { Text, View } from 'react-native';
 
 import { Button, IconButton, Screen, styles } from '../components/ui';
@@ -13,7 +14,7 @@ export default function Success() {
   return (
     <Screen style={{ justifyContent: 'space-between' }}>
       <View style={{ gap: space.lg }}>
-        <IconButton glyph="✕" label="Close" onPress={done} />
+        <IconButton icon={X} label="Close" onPress={done} />
         <View
           style={{
             width: 72,
@@ -23,7 +24,7 @@ export default function Success() {
             alignItems: 'center',
             justifyContent: 'center',
           }}>
-          <Text style={{ fontSize: 34, fontWeight: '700', color: colors.ink }}>✓</Text>
+          <Check size={36} strokeWidth={2.25} color={colors.ink} />
         </View>
         <Text style={styles.heading}>{message}</Text>
       </View>

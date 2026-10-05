@@ -1,9 +1,10 @@
 import { router } from 'expo-router';
+import { User } from 'lucide-react-native';
 import { Pressable, Text } from 'react-native';
 
-import { colors } from '../theme';
+import { colors, weight } from '../theme';
 
-// Opens Profile. Shows the tag's initial until there is a photo.
+// Opens Profile. Shows the tag's initial, or a person icon before a tag is picked.
 export function Avatar({ tag }: { tag?: string | null }) {
   return (
     <Pressable
@@ -21,7 +22,11 @@ export function Avatar({ tag }: { tag?: string | null }) {
         borderWidth: 2,
         borderColor: colors.ink,
       }}>
-      <Text style={{ color: colors.ink, fontSize: 18, fontWeight: '800' }}>{(tag?.[0] ?? '·').toUpperCase()}</Text>
+      {tag ? (
+        <Text style={{ color: colors.ink, fontSize: 18, fontWeight: weight.semibold }}>{tag[0].toUpperCase()}</Text>
+      ) : (
+        <User size={22} strokeWidth={2} color={colors.ink} />
+      )}
     </Pressable>
   );
 }

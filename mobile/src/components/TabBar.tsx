@@ -1,5 +1,6 @@
+import { ArrowLeftRight, Clock, House } from 'lucide-react-native';
 import type { ComponentProps } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Tabs } from 'expo-router';
 
@@ -22,13 +23,22 @@ export function TabBar({ state, descriptors, navigation }: TabBarProps) {
             <Pressable
               key={route.key}
               accessibilityRole="tab"
+              accessibilityLabel={label}
               accessibilityState={{ selected: focused }}
               onPress={() => {
                 const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
                 if (!focused && !event.defaultPrevented) navigation.navigate(route.name);
               }}
               style={[styles.item, focused && (onAccent ? styles.itemFocusedOnAccent : styles.itemFocused)]}>
-              <Text style={[styles.label, !focused && { opacity: 0.55 }]}>{label}</Text>
+              <View style={!focused && { opacity: 0.5 }}>
+                {route.name === 'index' ? (
+                  <House size={26} strokeWidth={2} color={colors.ink} />
+                ) : route.name === 'activity' ? (
+                  <Clock size={26} strokeWidth={2} color={colors.ink} />
+                ) : (
+                  <ArrowLeftRight size={26} strokeWidth={2} color={colors.ink} />
+                )}
+              </View>
             </Pressable>
           );
         })}
@@ -52,5 +62,4 @@ const styles = StyleSheet.create({
   item: { height: 48, minWidth: 92, paddingHorizontal: 18, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   itemFocused: { backgroundColor: colors.sheet },
   itemFocusedOnAccent: { backgroundColor: colors.onAccentWash },
-  label: { color: colors.ink, fontSize: 15, fontWeight: '700' },
 });

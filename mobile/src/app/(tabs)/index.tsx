@@ -1,15 +1,17 @@
 import { router } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
+import { Eye, EyeOff } from 'lucide-react-native';
 import { useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '../../components/Avatar';
-import { Button, styles } from '../../components/ui';
+import { Sky } from '../../components/Sky';
+import { Button, styles, useStatusBar } from '../../components/ui';
 import { ASSET_BLURB, formatMinor } from '../../lib/money';
 import { useBalances } from '../../lib/useBalances';
 import { useMe } from '../../lib/useMe';
-import { colors, radius, space, TAB_BAR_SPACE } from '../../theme';
+import { useSkyMode } from '../../lib/prefs';
+import { colors, weight, radius, space, TAB_BAR_SPACE } from '../../theme';
 
 const HIDDEN = '••••';
 
@@ -19,13 +21,18 @@ export default function Home() {
   const { balances, error } = useBalances();
   const me = useMe();
   const [hidden, setHidden] = useState(false);
+  useStatusBar('light');
+  const sky = useSkyMode();
 
   const ngn = balances?.find((b) => b.asset === 'NGN');
   const others = balances?.filter((b) => b.asset !== 'NGN') ?? [];
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.night, paddingTop: insets.top }}>
-      <StatusBar style="light" />
+      {/* Sized to the strip above the sheet, so the horizon glow meets its edge. */}
+      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: insets.top + 210 }}>
+        <Sky mode={sky} />
+      </View>
 
       <View style={[styles.row, { paddingHorizontal: space.md, paddingVertical: space.sm, justifyContent: 'flex-end' }]}>
         <Avatar tag={me?.tag} />
@@ -41,15 +48,15 @@ export default function Home() {
             padding: space.md,
             paddingBottom: space.md + radius.sheet,
             marginBottom: -radius.sheet,
-            backgroundColor: colors.nightRaised,
+            backgroundColor: sky === 'day' ? colors.onDayWash : colors.onNightWash,
             borderTopLeftRadius: radius.lg,
             borderTopRightRadius: radius.lg,
           },
         ]}>
-        <View style={{ backgroundColor: colors.onNightWash, borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 8 }}>
-          <Text style={{ color: colors.white, fontSize: 14, fontWeight: '600' }}>Tier {me?.kyc_tier ?? 0}</Text>
+        <View style={{ backgroundColor: 'rgba(255, 255, 255, 0.16)', borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 8 }}>
+          <Text style={{ color: colors.white, fontSize: 14, fontWeight: weight.medium }}>Tier {me?.kyc_tier ?? 0}</Text>
         </View>
-        <Text style={{ color: colors.white, fontSize: 17, fontWeight: '500', opacity: 0.8 }}>
+        <Text style={{ color: colors.white, fontSize: 17, fontWeight: weight.medium, opacity: 0.95 }}>
           {me?.tag ? `@${me.tag}` : 'No tag yet'}
         </Text>
       </View>
@@ -67,7 +74,11 @@ export default function Home() {
               accessibilityLabel={hidden ? 'Show balances' : 'Hide balances'}
               onPress={() => setHidden((h) => !h)}
               hitSlop={12}>
-              <Text style={[styles.muted, { fontWeight: '600' }]}>{hidden ? 'Show' : 'Hide'}</Text>
+              {hidden ? (
+                <Eye size={26} strokeWidth={2} color={colors.ink} />
+              ) : (
+                <EyeOff size={26} strokeWidth={2} color={colors.ink} />
+              )}
             </Pressable>
           </View>
           <Text style={[styles.amount, { fontSize: 56, marginTop: space.xs }]} adjustsFontSizeToFit numberOfLines={1}>

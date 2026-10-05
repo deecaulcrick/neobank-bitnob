@@ -1,19 +1,22 @@
 import { Stack } from 'expo-router';
-import { ActivityIndicator, View } from 'react-native';
+import * as SplashScreen from 'expo-splash-screen';
+import { useEffect } from 'react';
+
+// Hold the splash until the session is known, so the sign-in screen never flashes.
+SplashScreen.preventAutoHideAsync();
 
 import { SessionProvider, useSession } from '../lib/session';
-import { colors } from '../theme';
+import { colors, weight } from '../theme';
 
 function RootStack() {
   const { session, loading } = useSession();
+  const ready = !loading;
 
-  if (loading) {
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.sheet, justifyContent: 'center' }}>
-        <ActivityIndicator color={colors.ink} />
-      </View>
-    );
-  }
+  useEffect(() => {
+    if (ready) SplashScreen.hideAsync();
+  }, [ready]);
+
+  if (!ready) return null;
 
   const sheet = { presentation: 'modal', headerShown: true } as const;
   return (
@@ -23,7 +26,7 @@ function RootStack() {
         headerStyle: { backgroundColor: colors.sheet },
         headerShadowVisible: false,
         headerTintColor: colors.ink,
-        headerTitleStyle: { fontWeight: '700' },
+        headerTitleStyle: { fontWeight: weight.medium },
         contentStyle: { backgroundColor: colors.sheet },
       }}>
       <Stack.Protected guard={!session}>

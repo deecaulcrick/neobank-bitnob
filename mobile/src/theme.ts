@@ -10,6 +10,7 @@ export const colors = {
   accent: '#B6F36A',
   onAccentWash: 'rgba(11, 13, 12, 0.09)', // buttons and chips drawn on the accent
   onNightWash: 'rgba(255, 255, 255, 0.1)',
+  onDayWash: 'rgba(8, 32, 84, 0.26)', // the same strip over the bright day sky
   white: '#FFFFFF',
   danger: '#D4372C',
 };
@@ -19,3 +20,10 @@ export const radius = { md: 16, lg: 28, sheet: 36, pill: 999 };
 
 // Clearance for the floating tab bar.
 export const TAB_BAR_SPACE = 96;
+
+// System font (SF Pro on iOS, Roboto on Android), kept on the light side.
+export const weight = {
+  regular: '400',
+  medium: '500',
+  semibold: '600',
+} as const;

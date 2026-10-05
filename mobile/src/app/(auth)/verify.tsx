@@ -1,4 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
+import { ArrowLeft } from 'lucide-react-native';
 import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, Text, TextInput, View } from 'react-native';
 
@@ -27,7 +28,7 @@ export default function Verify() {
         style={{ flex: 1, justifyContent: 'space-between' }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={{ gap: space.sm }}>
-          <IconButton glyph="←" label="Back" onPress={() => router.back()} />
+          <IconButton icon={ArrowLeft} label="Back" onPress={() => router.back()} />
           <Text style={[styles.heading, { marginTop: space.lg }]}>Enter the code</Text>
           <Text style={styles.muted}>Sent to {phone}</Text>
           <TextInput

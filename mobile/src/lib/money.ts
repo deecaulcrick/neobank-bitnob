@@ -8,8 +8,8 @@ export const ASSETS: Asset[] = ['NGN', 'USDT', 'USDC', 'BTC'];
 
 export const DECIMALS: Record<Asset, number> = { NGN: 2, USDT: 6, USDC: 6, BTC: 8 };
 
-// Decimals worth showing; the rest are trimmed when they are zero.
-const DISPLAY_DECIMALS: Record<Asset, number> = { NGN: 2, USDT: 2, USDC: 2, BTC: 8 };
+// Decimals always shown; anything beyond is kept only when it is non-zero.
+const DISPLAY_DECIMALS: Record<Asset, number> = { NGN: 2, USDT: 2, USDC: 2, BTC: 2 };
 
 export const SYMBOL: Record<Asset, string> = { NGN: '₦', USDT: '$', USDC: '$', BTC: '₿' };
 
