@@ -46,11 +46,15 @@ func Load() (Config, error) {
 	if c.SupabaseURL == "" && c.SupabaseJWTSecret == "" {
 		missing = append(missing, "SUPABASE_URL (or SUPABASE_JWT_SECRET)")
 	}
-	if c.BitnobClientID == "" {
-		missing = append(missing, "BITNOB_CLIENT_ID")
-	}
-	if c.BitnobClientSecret == "" {
-		missing = append(missing, "BITNOB_CLIENT_SECRET")
+	// Bitnob credentials are optional in development so the ledger, in-app
+	// sends and the app can run before sandbox keys exist.
+	if c.Env == "production" {
+		if c.BitnobClientID == "" {
+			missing = append(missing, "BITNOB_CLIENT_ID")
+		}
+		if c.BitnobClientSecret == "" {
+			missing = append(missing, "BITNOB_CLIENT_SECRET")
+		}
 	}
 	if len(missing) > 0 {
 		return c, fmt.Errorf("missing required env: %s", strings.Join(missing, ", "))

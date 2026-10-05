@@ -40,13 +40,27 @@ is signed: credit > 0, debit < 0, and each entry sums to zero per asset
    under Auth -> Phone for development), then:
 
    ```bash
+   brew install supabase/tap/supabase
+   supabase login
    supabase init      # generates supabase/config.toml; keeps migrations/
    supabase link --project-ref YOUR-PROJECT
-   supabase db push
    ```
 
-2. **Backend**: `cp backend/.env.example backend/.env`, fill it in, then
-   `make whoami` (Bitnob credentials check), `make api`, `make worker`.
+2. **Backend**: `cp backend/.env.example backend/.env` and fill it in.
+   `DATABASE_URL` is the Transaction pooler string (port 6543) and
+   `SUPABASE_URL` is the project URL (`https://<ref>.supabase.co`), not the
+   database host. Bitnob keys can stay empty in development. Then push the
+   schema through that same connection and start the services:
+
+   ```bash
+   set -a && . backend/.env && set +a && supabase db push --db-url "$DATABASE_URL"
+   make api
+   make worker
+   ```
+
+   Plain `supabase db push` uses port 5432, which some networks drop
+   ("Connection terminated unexpectedly"); `--db-url` avoids that.
+   `make whoami` checks Bitnob credentials once you have them.
 
 3. **Mobile**: `cp mobile/.env.example mobile/.env`, fill it in, then `make mobile`.
 

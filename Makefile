@@ -21,8 +21,8 @@ test:           ## unit tests (ledger DB tests are skipped)
 test-db:        ## all tests, including ledger tests, against TEST_DATABASE_URL
 	cd backend && go test -count=1 ./...
 
-migrate:        ## push supabase/migrations to the linked Supabase project
-	supabase db push
+migrate:        ## push supabase/migrations using DATABASE_URL from backend/.env
+	supabase db push --db-url "$(DATABASE_URL)"
 
 mobile:         ## start the Expo dev server
 	cd mobile && npx expo start
