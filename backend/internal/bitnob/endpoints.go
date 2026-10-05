@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 )
 
 // Responses are kept as raw JSON until each milestone pins the real shapes
@@ -138,22 +139,96 @@ func (c *Client) SimulateDeposit(ctx context.Context, accountID string) (Account
 }
 
 // --- M2: swaps -------------------------------------------------------------
+// Shapes confirmed against the sandbox. Quantities and prices are decimal
+// strings in major units.
 
+// TradingQuoteRequest asks for a locked rate. With side "sell", quantity is
+// the amount of base_currency the customer gives up; every one of the twelve
+// directions between NGN, USDT, USDC and BTC can be expressed that way.
 type TradingQuoteRequest struct {
-	FromAsset string `json:"from_asset"`
-	ToAsset   string `json:"to_asset"`
-	Amount    string `json:"amount"`
+	BaseCurrency  string `json:"base_currency"`
+	QuoteCurrency string `json:"quote_currency"`
+	Side          string `json:"side"`
+	Quantity      string `json:"quantity"`
 }
 
-func (c *Client) CreateTradingQuote(ctx context.Context, in TradingQuoteRequest) (json.RawMessage, error) {
-	var out json.RawMessage
-	return out, c.do(ctx, http.MethodPost, "/api/trading/quotes", in, &out)
+// TradingQuote expires after about 30 seconds on NGN pairs and 5 minutes on
+// crypto-only pairs; always read ExpiresAt.
+type TradingQuote struct {
+	ID        string    `json:"id"`
+	Price     string    `json:"price"`
+	ExpiresAt time.Time `json:"expires_at"`
+	Exchange  *struct {
+		SendQuantity    string `json:"send_quantity"`
+		SendCurrency    string `json:"send_currency"`
+		ReceiveQuantity string `json:"receive_quantity"`
+		ReceiveCurrency string `json:"receive_currency"`
+	} `json:"exchange"`
 }
 
-// CreateOrder executes against a quote; `trade.completed` finishes it. UNVERIFIED path.
-func (c *Client) CreateOrder(ctx context.Context, in any) (json.RawMessage, error) {
-	var out json.RawMessage
-	return out, c.do(ctx, http.MethodPost, "/api/trading/orders", in, &out)
+func (c *Client) CreateTradingQuote(ctx context.Context, in TradingQuoteRequest) (TradingQuote, json.RawMessage, error) {
+	raw, err := c.Raw(ctx, http.MethodPost, "/api/trading/quotes", in)
+	if err != nil {
+		return TradingQuote{}, nil, err
+	}
+	var env envelope[struct {
+		Quote TradingQuote `json:"quote"`
+	}]
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return TradingQuote{}, nil, err
+	}
+	return env.Data.Quote, raw, nil
+}
+
+type CreateOrderRequest struct {
+	BaseCurrency  string `json:"base_currency"`
+	QuoteCurrency string `json:"quote_currency"`
+	Side          string `json:"side"`
+	Quantity      string `json:"quantity"`
+	Price         string `json:"price"`
+	QuoteID       string `json:"quote_id"`
+	Reference     string `json:"reference"`
+}
+
+// Order status is "pending", "filled", "rejected" or "cancelled". Trades are
+// all-or-nothing.
+type Order struct {
+	ID        string `json:"id"`
+	Status    string `json:"status"`
+	Reference string `json:"reference"`
+}
+
+// CreateOrder executes against a quote. A quote can be consumed once.
+func (c *Client) CreateOrder(ctx context.Context, in CreateOrderRequest) (Order, json.RawMessage, error) {
+	raw, err := c.Raw(ctx, http.MethodPost, "/api/trading/orders", in)
+	if err != nil {
+		return Order{}, nil, err
+	}
+	var env envelope[struct {
+		Order Order `json:"order"`
+	}]
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return Order{}, nil, err
+	}
+	return env.Data.Order, raw, nil
+}
+
+func (c *Client) GetOrder(ctx context.Context, id string) (Order, error) {
+	var env envelope[struct {
+		Order Order `json:"order"`
+	}]
+	err := c.do(ctx, http.MethodGet, "/api/trading/orders/"+id, nil, &env)
+	return env.Data.Order, err
+}
+
+// ListOrders returns recent orders. In the sandbox, orders on NGN pairs do
+// not appear here, so a missing order is not proof it was never placed.
+func (c *Client) ListOrders(ctx context.Context) ([]Order, error) {
+	var env envelope[struct {
+		Orders []Order `json:"orders"`
+	}]
+	err := c.do(ctx, http.MethodGet, "/api/trading/orders", nil, &env)
+	return env.Data.Orders, err
 }
 
 // --- M3: payouts -----------------------------------------------------------

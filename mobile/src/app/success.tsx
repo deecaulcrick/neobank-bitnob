@@ -1,14 +1,15 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { Check, X } from 'lucide-react-native';
+import { Check, Clock, X } from 'lucide-react-native';
 import { Text, View } from 'react-native';
 
 import { Button, IconButton, Screen, styles } from '../components/ui';
 import { colors, space } from '../theme';
 
-// Only shown once the money has actually moved. Payouts will show "Sending"
-// here until the rail confirms.
+// A tick only once the money has actually moved; anything still in flight
+// gets a clock and wording that says so.
 export default function Success() {
-  const { message } = useLocalSearchParams<{ message: string }>();
+  // `pending` marks a movement that is under way but not yet confirmed.
+  const { message, pending } = useLocalSearchParams<{ message: string; pending?: string }>();
   const done = () => router.dismissTo('/');
 
   return (
@@ -20,11 +21,15 @@ export default function Success() {
             width: 72,
             height: 72,
             borderRadius: 36,
-            backgroundColor: colors.accent,
+            backgroundColor: pending ? colors.card : colors.accent,
             alignItems: 'center',
             justifyContent: 'center',
           }}>
-          <Check size={36} strokeWidth={2.25} color={colors.ink} />
+          {pending ? (
+            <Clock size={34} strokeWidth={2.25} color={colors.ink} />
+          ) : (
+            <Check size={36} strokeWidth={2.25} color={colors.ink} />
+          )}
         </View>
         <Text style={styles.heading}>{message}</Text>
       </View>

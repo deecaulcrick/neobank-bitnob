@@ -48,21 +48,61 @@ export const ASSET_BLURB: Record<Asset, string> = {
   BTC: 'Long-term holding',
 };
 
-// Short naira balance for the tab bar: ₦500, ₦6.7k, ₦55k, ₦1.2m. Truncates
-// rather than rounds so it never shows more than the user has.
-export function formatCompactNaira(kobo: number): string {
-  const naira = Math.floor(kobo / 100);
+export type Fiat = 'NGN' | 'USD';
+
+const FIAT_SYMBOL: Record<Fiat, string> = { NGN: '₦', USD: '$' };
+
+// Value of every balance in one display currency, in that currency's minor
+// units (kobo or cents). Built from indicative rates, so it is an estimate
+// for the screen and never an amount to transact with.
+export function totalValue(
+  fiat: Fiat,
+  balances: { asset: Asset; available: number }[],
+  prices: { ngn: Record<Asset, number>; usd: Record<Asset, number> },
+): number {
+  const rates = fiat === 'NGN' ? prices.ngn : prices.usd;
+  const major = balances.reduce((sum, b) => sum + (b.available / 10 ** DECIMALS[b.asset]) * rates[b.asset], 0);
+  return Math.floor(major * 100);
+}
+
+// One asset's value in the display currency, in minor units.
+export function valueOf(fiat: Fiat, asset: Asset, minor: number, prices: { ngn: Record<Asset, number>; usd: Record<Asset, number> }) {
+  return totalValue(fiat, [{ asset, available: minor }], prices);
+}
+
+export function formatFiat(fiat: Fiat, minor: number): string {
+  const digits = Math.abs(Math.trunc(minor)).toString().padStart(3, '0');
+  const whole = digits.slice(0, -2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${minor < 0 ? '-' : ''}${FIAT_SYMBOL[fiat]}${whole}.${digits.slice(-2)}`;
+}
+
+// Short balance for the tab bar: ₦500, ₦6.7k, $55k, ₦1.2m. Truncates rather
+// than rounds so it never shows more than the user has.
+export function formatCompact(fiat: Fiat, minor: number): string {
+  const major = Math.floor(minor / 100);
   const units: [number, string][] = [
     [1e9, 'b'],
     [1e6, 'm'],
     [1e3, 'k'],
   ];
   for (const [size, suffix] of units) {
-    if (naira >= size) {
-      const tenths = Math.floor((naira / size) * 10) / 10;
+    if (major >= size) {
+      const tenths = Math.floor((major / size) * 10) / 10;
       const text = tenths < 10 && tenths % 1 !== 0 ? tenths.toFixed(1) : String(Math.floor(tenths));
-      return `₦${text}${suffix}`;
+      return `${FIAT_SYMBOL[fiat]}${text}${suffix}`;
     }
   }
-  return `₦${naira}`;
+  // Small dollar totals keep their cents; $3 would hide most of $3.63.
+  if (fiat === 'USD' && major < 100) return `$${(Math.floor(minor) / 100).toFixed(2)}`;
+  return `${FIAT_SYMBOL[fiat]}${major}`;
+}
+
+// Balance for cards and summaries: dollar stablecoins to the cent (truncated,
+// never rounded up); everything else as formatMinor. Use formatMinor where
+// the exact amount matters, such as a quote.
+export function formatBalance(asset: Asset, minor: number): string {
+  if (asset === 'USDT' || asset === 'USDC') {
+    return formatMinor(asset, Math.trunc(minor / 10_000) * 10_000);
+  }
+  return formatMinor(asset, minor);
 }

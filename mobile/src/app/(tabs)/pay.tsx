@@ -5,7 +5,8 @@ import { Text, View } from 'react-native';
 import { Avatar } from '../../components/Avatar';
 import { Keypad } from '../../components/Keypad';
 import { Button, Chip, Screen, styles } from '../../components/ui';
-import { appendKey, ASSETS, formatInput, type Asset } from '../../lib/money';
+import { appendKey, ASSETS, DECIMALS, formatBalance, formatInput, type Asset } from '../../lib/money';
+import { useBalances } from '../../lib/useBalances';
 import { useMe } from '../../lib/useMe';
 import { space, TAB_BAR_SPACE } from '../../theme';
 
@@ -15,6 +16,15 @@ export default function Pay() {
   const [asset, setAsset] = useState<Asset>('NGN');
   const [amount, setAmount] = useState('');
   const valid = Number(amount) > 0;
+  const available = useBalances().balances?.find((b) => b.asset === asset)?.available;
+
+  // The whole balance as a keypad string, without trailing zeros.
+  function fillMax() {
+    if (!available) return;
+    const d = DECIMALS[asset];
+    const digits = String(available).padStart(d + 1, '0');
+    setAmount(`${digits.slice(0, -d)}.${digits.slice(-d)}`.replace(/\.?0+$/, ''));
+  }
 
   return (
     <Screen tone="accent" edges={['top']} style={{ paddingBottom: TAB_BAR_SPACE }}>
@@ -40,7 +50,12 @@ export default function Pay() {
         <Text style={[styles.amount, { fontSize: 88 }]} adjustsFontSizeToFit numberOfLines={1}>
           {formatInput(asset, amount)}
         </Text>
-        {/* TODO(M2): max button and live conversion line. */}
+        {available !== undefined && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.sm }}>
+            <Text style={styles.body}>{formatBalance(asset, available)} available</Text>
+            {available > 0 && <Chip label="Max" tone="accent" onPress={fillMax} />}
+          </View>
+        )}
       </View>
 
       <Keypad onKey={(key) => setAmount((cur) => appendKey(asset, cur, key))} />

@@ -13,6 +13,8 @@ import (
 	"github.com/deecaulcrick/neobank/backend/internal/auth"
 	"github.com/deecaulcrick/neobank/backend/internal/bitnob"
 	"github.com/deecaulcrick/neobank/backend/internal/config"
+	"github.com/deecaulcrick/neobank/backend/internal/prices"
+	"github.com/deecaulcrick/neobank/backend/internal/swaps"
 )
 
 type Server struct {
@@ -20,6 +22,8 @@ type Server struct {
 	Pool     *pgxpool.Pool
 	Bitnob   *bitnob.Client
 	Accounts *accounts.Service
+	Swaps    *swaps.Service
+	Prices   *prices.Service
 	Verifier *auth.Verifier
 	Webhooks http.Handler
 	Log      *slog.Logger
@@ -39,14 +43,15 @@ func (s *Server) Routes() http.Handler {
 	// M1 — accounts
 	authed("GET /v1/me", s.getMe)
 	authed("PUT /v1/me/tag", s.setTag)
+	authed("PUT /v1/me/display-currency", s.setDisplayCurrency)
 	authed("GET /v1/balances", s.getBalances)
 	authed("POST /v1/onboarding/kyc", s.submitKYC)
 	authed("GET /v1/virtual-account", s.getVirtualAccount)
 
 	// M2 — swaps
-	authed("GET /v1/prices", notImplemented)
-	authed("POST /v1/swaps/quotes", notImplemented)
-	authed("POST /v1/swaps", notImplemented)
+	authed("GET /v1/prices", s.getPrices)
+	authed("POST /v1/swaps/quotes", s.createSwapQuote)
+	authed("POST /v1/swaps", s.executeSwap)
 
 	// M3 — payouts
 	authed("GET /v1/payouts/countries", notImplemented)

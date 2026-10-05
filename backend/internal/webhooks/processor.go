@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/deecaulcrick/neobank/backend/internal/accounts"
+	"github.com/deecaulcrick/neobank/backend/internal/swaps"
 )
 
 // Event is one stored webhook. Handlers dispatch on Event (the event name),
@@ -44,7 +45,8 @@ func NewProcessor(pool *pgxpool.Pool, log *slog.Logger) *Processor {
 	p.Handle("virtual_account.deposit.success", ngnDeposit)
 
 	// M2
-	p.Handle("trade.completed", notImplemented)
+	p.Handle("trade.completed", trade)
+	p.Handle("trade.failed", trade)
 	// M3
 	p.Handle("payouts.initialized", notImplemented)
 	p.Handle("payouts.processing", notImplemented)
@@ -58,6 +60,12 @@ func NewProcessor(pool *pgxpool.Pool, log *slog.Logger) *Processor {
 func (p *Processor) Handle(event string, h Handler) { p.handlers[event] = h }
 
 func notImplemented(context.Context, pgx.Tx, Event) error { return ErrNotImplemented }
+
+// trade settles or releases a swap. Like ngnDeposit, it has not yet seen a
+// real delivery; the sweeper covers it if the payload shape is off.
+func trade(ctx context.Context, tx pgx.Tx, ev Event) error {
+	return swaps.ApplyWebhook(ctx, tx, ev.Event, ev.Payload)
+}
 
 // ngnDeposit credits a bank transfer into a user's virtual account.
 // Payload fields are from Bitnob's docs; the sandbox could not deliver one to

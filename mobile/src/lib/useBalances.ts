@@ -1,11 +1,12 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useSyncExternalStore } from 'react';
 
-import { api, type Balance } from './api';
+import { api, type Balance, type Prices } from './api';
 
-type State = { balances: Balance[] | null; error: string };
+// prices stays null when rates can't be had; screens then fall back to naira only.
+type State = { balances: Balance[] | null; prices: Prices | null; error: string };
 
-let state: State = { balances: null, error: '' };
+let state: State = { balances: null, prices: null, error: '' };
 const listeners = new Set<() => void>();
 
 function set(next: State) {
@@ -19,8 +20,13 @@ function subscribe(listener: () => void) {
 }
 
 export async function refreshBalances() {
+  // Prices are a nicety: a failure there must not hide the balances.
+  api
+    .prices()
+    .then((prices) => set({ ...state, prices }))
+    .catch(() => {});
   try {
-    set({ balances: (await api.balances()).balances, error: '' });
+    set({ ...state, balances: (await api.balances()).balances, error: '' });
   } catch (e) {
     set({ ...state, error: e instanceof Error ? e.message : 'Could not load balances' });
   }
@@ -28,7 +34,7 @@ export async function refreshBalances() {
 
 // Called on sign-out so the next user never sees the last one's numbers.
 export function clearBalances() {
-  set({ balances: null, error: '' });
+  set({ balances: null, prices: null, error: '' });
 }
 
 // Shared balances; reading them does not fetch.

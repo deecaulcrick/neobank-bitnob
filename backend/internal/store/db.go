@@ -24,11 +24,19 @@ func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, err
 	}
-	pingCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	if err := pool.Ping(pingCtx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("ping database: %w", err)
+	// The first connection can be slow on a poor network; try a few times
+	// before giving up.
+	for attempt := 1; ; attempt++ {
+		pingCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		err = pool.Ping(pingCtx)
+		cancel()
+		if err == nil {
+			break
+		}
+		if attempt == 4 || ctx.Err() != nil {
+			pool.Close()
+			return nil, fmt.Errorf("ping database: %w", err)
+		}
 	}
 	return pool, nil
 }

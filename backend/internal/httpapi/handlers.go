@@ -15,6 +15,7 @@ import (
 	"github.com/deecaulcrick/neobank/backend/internal/auth"
 	"github.com/deecaulcrick/neobank/backend/internal/ledger"
 	"github.com/deecaulcrick/neobank/backend/internal/money"
+	"github.com/deecaulcrick/neobank/backend/internal/swaps"
 )
 
 type meResponse struct {
@@ -90,6 +91,38 @@ func (s *Server) setTag(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusOK, map[string]string{"tag": tag})
 	}
+}
+
+// setDisplayCurrency chooses what Home totals the user's assets in.
+func (s *Server) setDisplayCurrency(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	var in struct {
+		Currency string `json:"currency"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	if in.Currency != "NGN" && in.Currency != "USD" {
+		writeError(w, http.StatusBadRequest, "currency must be NGN or USD")
+		return
+	}
+	if _, err := s.Pool.Exec(r.Context(),
+		`update users set display_currency = $2 where id = $1`, u.ID, in.Currency); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"display_currency": in.Currency})
+}
+
+// getPrices returns indicative rates for valuing balances. Display only.
+func (s *Server) getPrices(w http.ResponseWriter, r *http.Request) {
+	rates, err := s.Prices.Rates(r.Context())
+	if err != nil {
+		s.Log.Warn("prices unavailable", "err", err)
+		writeError(w, http.StatusServiceUnavailable, "Prices are not available right now.")
+		return
+	}
+	writeJSON(w, http.StatusOK, rates)
 }
 
 type balanceResponse struct {
@@ -275,6 +308,78 @@ func (s *Server) accountsError(w http.ResponseWriter, r *http.Request, err error
 		writeError(w, http.StatusNotFound, "You don't have an account number yet.")
 	case errors.Is(err, accounts.ErrUnavailable):
 		writeError(w, http.StatusServiceUnavailable, "Account services are not available right now.")
+	default:
+		s.fail(w, r, err)
+	}
+}
+
+// createSwapQuote locks a rate for the review screen.
+func (s *Server) createSwapQuote(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	var in struct {
+		From   string `json:"from"`
+		To     string `json:"to"`
+		Amount string `json:"amount"` // decimal string in major units of From
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	from, err := money.ParseAsset(in.From)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	to, err := money.ParseAsset(in.To)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	amount, err := money.Parse(from, in.Amount)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid amount")
+		return
+	}
+	q, err := s.Swaps.CreateQuote(r.Context(), u.ID, from, to, amount)
+	if err != nil {
+		s.swapError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, q)
+}
+
+// executeSwap trades against a quote. The response status is "completed",
+// or "pending" when Bitnob hasn't confirmed yet.
+func (s *Server) executeSwap(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	var in struct {
+		QuoteID uuid.UUID `json:"quote_id"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	t, err := s.Swaps.Execute(r.Context(), u.ID, in.QuoteID)
+	if err != nil {
+		s.swapError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+func (s *Server) swapError(w http.ResponseWriter, r *http.Request, err error) {
+	var invalid *swaps.ValidationError
+	switch {
+	case errors.As(err, &invalid):
+		writeError(w, http.StatusUnprocessableEntity, invalid.Message)
+	case errors.Is(err, ledger.ErrInsufficientFunds):
+		writeError(w, http.StatusUnprocessableEntity, "You don't have enough for this swap.")
+	case errors.Is(err, swaps.ErrQuoteExpired):
+		writeError(w, http.StatusGone, "That rate expired. Here's a fresh one.")
+	case errors.Is(err, swaps.ErrQuoteUsed):
+		writeError(w, http.StatusConflict, "That swap was already submitted.")
+	case errors.Is(err, swaps.ErrQuoteNotFound):
+		writeError(w, http.StatusNotFound, "We couldn't find that quote.")
+	case errors.Is(err, swaps.ErrUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "This swap isn't available right now. Try again later.")
 	default:
 		s.fail(w, r, err)
 	}

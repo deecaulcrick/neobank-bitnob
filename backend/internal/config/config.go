@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -27,6 +28,9 @@ type Config struct {
 
 	// Key for the HMAC that stands in for a BVN in our database.
 	KYCHashKey string
+
+	// Our margin on a swap, in basis points of what the user receives.
+	SwapFeeBps int64
 }
 
 func Load() (Config, error) {
@@ -41,6 +45,15 @@ func Load() (Config, error) {
 		BitnobClientSecret:  os.Getenv("BITNOB_CLIENT_SECRET"),
 		BitnobWebhookSecret: os.Getenv("BITNOB_WEBHOOK_SECRET"),
 		KYCHashKey:          os.Getenv("KYC_HASH_KEY"),
+		SwapFeeBps:          50,
+	}
+
+	if v := os.Getenv("SWAP_FEE_BPS"); v != "" {
+		bps, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || bps < 0 || bps > 1000 {
+			return c, errors.New("SWAP_FEE_BPS must be a whole number from 0 to 1000")
+		}
+		c.SwapFeeBps = bps
 	}
 
 	var missing []string

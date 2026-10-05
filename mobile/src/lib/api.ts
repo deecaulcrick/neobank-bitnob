@@ -56,6 +56,30 @@ export type KycInput = {
 
 export type VirtualAccount = { account_number: string; account_name: string; bank_name: string };
 
+// Indicative value of one major unit of each asset, for display only.
+export type Prices = { ngn: Record<Asset, number>; usd: Record<Asset, number>; as_of: string };
+
+export type SwapQuote = {
+  id: string;
+  from_asset: Asset;
+  to_asset: Asset;
+  from_amount: number;
+  to_amount: number; // what the user receives, after the fee
+  fee_amount: number; // in to_asset
+  rate: string; // to_asset per one from_asset, all-in
+  expires_at: string;
+  enough_funds: boolean;
+};
+
+export type SwapTrade = {
+  id: string;
+  status: 'pending' | 'completed' | 'failed';
+  from_asset: Asset;
+  to_asset: Asset;
+  from_amount: number;
+  to_amount: number;
+};
+
 export type Balance = { asset: Asset; available: number; pending: number; decimals: number };
 
 export const api = {
@@ -63,7 +87,13 @@ export const api = {
   setTag: (tag: string) => request<{ tag: string }>('PUT', '/v1/me/tag', { tag }),
   submitKyc: (input: KycInput) => request<VirtualAccount>('POST', '/v1/onboarding/kyc', input),
   virtualAccount: () => request<VirtualAccount>('GET', '/v1/virtual-account'),
+  setDisplayCurrency: (currency: 'NGN' | 'USD') =>
+    request<{ display_currency: 'NGN' | 'USD' }>('PUT', '/v1/me/display-currency', { currency }),
+  prices: () => request<Prices>('GET', '/v1/prices'),
   balances: () => request<{ balances: Balance[] }>('GET', '/v1/balances'),
+  swapQuote: (input: { from: Asset; to: Asset; amount: string }) =>
+    request<SwapQuote>('POST', '/v1/swaps/quotes', input),
+  swap: (quoteId: string) => request<SwapTrade>('POST', '/v1/swaps', { quote_id: quoteId }),
   transfer: (input: { to_tag: string; asset: Asset; amount: string; idempotency_key: string }) =>
     request<{ entry_id: string; status: string }>('POST', '/v1/transfers', input),
   // Development only: pays NGN 1,000 in through the Bitnob sandbox.

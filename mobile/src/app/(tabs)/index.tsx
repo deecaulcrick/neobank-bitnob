@@ -6,25 +6,30 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '../../components/Avatar';
 import { Sky } from '../../components/Sky';
 import { Button, styles, useStatusBar } from '../../components/ui';
-import { ASSET_BLURB, formatMinor } from '../../lib/money';
-import { useBalances } from '../../lib/useBalances';
-import { useMe } from '../../lib/useMe';
+import { useMeState } from '../../lib/me';
+import { ASSET_BLURB, formatBalance, formatFiat, formatMinor, totalValue, valueOf } from '../../lib/money';
 import { setHideBalances, useHideBalances, useSkyMode } from '../../lib/prefs';
-import { colors, weight, radius, space, TAB_BAR_SPACE } from '../../theme';
+import { useBalances } from '../../lib/useBalances';
+import { colors, radius, space, TAB_BAR_SPACE, weight } from '../../theme';
 
 const HIDDEN = '••••';
 
-// Home: dark chrome up top, then a light sheet with one big number.
+// Home: one balance, one tap to switch. The total of every asset, in the
+// user's display currency, sits large at the top left; tapping it cycles NGN
+// and USD. The per-asset breakdown follows underneath.
 export default function Home() {
   const insets = useSafeAreaInsets();
-  const { balances, error } = useBalances();
-  const me = useMe();
+  const { balances, prices, error } = useBalances();
+  const { me, setDisplayCurrency } = useMeState();
   const hidden = useHideBalances();
   useStatusBar('light');
   const sky = useSkyMode();
 
+  const fiat = me?.display_currency ?? 'NGN';
   const ngn = balances?.find((b) => b.asset === 'NGN');
-  const others = balances?.filter((b) => b.asset !== 'NGN') ?? [];
+  // Without rates there is nothing to total, so fall back to naira alone.
+  const total = balances && prices ? formatFiat(fiat, totalValue(fiat, balances, prices)) : null;
+  const headline = total ?? (ngn ? formatMinor('NGN', ngn.available) : '—');
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.night, paddingTop: insets.top }}>
@@ -62,52 +67,63 @@ export default function Home() {
 
       <ScrollView
         style={{ flex: 1, backgroundColor: colors.sheet, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet }}
-        contentContainerStyle={{ padding: space.md, paddingTop: space.lg, paddingBottom: TAB_BAR_SPACE + insets.bottom, gap: space.md }}>
-        <View style={{ paddingHorizontal: space.sm }}>
-          <View style={styles.row}>
-            {/* TODO(M2): total across all assets in the display currency, tap
-                to cycle NGN/USD. Needs prices; until then this is naira only. */}
-            <Text style={styles.body}>Naira balance</Text>
+        contentContainerStyle={{ paddingTop: space.sm, paddingBottom: TAB_BAR_SPACE + insets.bottom }}>
+        <View style={{ padding: space.md, gap: space.md }}>
+          <View style={{ paddingHorizontal: space.sm }}>
+            <View style={styles.row}>
+              <Text style={styles.body}>{total ? `Total balance · ${fiat}` : 'Naira balance'}</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={hidden ? 'Show balances' : 'Hide balances'}
+                onPress={() => setHideBalances(!hidden)}
+                hitSlop={12}>
+                {hidden ? (
+                  <Eye size={26} strokeWidth={2} color={colors.ink} />
+                ) : (
+                  <EyeOff size={26} strokeWidth={2} color={colors.ink} />
+                )}
+              </Pressable>
+            </View>
+            {/* Tapping the total cycles the display currency. */}
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={hidden ? 'Show balances' : 'Hide balances'}
-              onPress={() => setHideBalances(!hidden)}
-              hitSlop={12}>
-              {hidden ? (
-                <Eye size={26} strokeWidth={2} color={colors.ink} />
-              ) : (
-                <EyeOff size={26} strokeWidth={2} color={colors.ink} />
-              )}
+              accessibilityLabel={`Total balance ${hidden ? 'hidden' : headline}. Tap to show in ${fiat === 'NGN' ? 'dollars' : 'naira'}.`}
+              disabled={!total}
+              onPress={() => setDisplayCurrency(fiat === 'NGN' ? 'USD' : 'NGN')}>
+              <Text style={[styles.amount, { fontSize: 56, marginTop: space.xs }]} adjustsFontSizeToFit numberOfLines={1}>
+                {hidden ? HIDDEN : headline}
+              </Text>
             </Pressable>
+            {!!error && <Text style={styles.error}>{error}</Text>}
           </View>
-          <Text style={[styles.amount, { fontSize: 56, marginTop: space.xs }]} adjustsFontSizeToFit numberOfLines={1}>
-            {hidden ? HIDDEN : ngn ? formatMinor('NGN', ngn.available) : '—'}
-          </Text>
-          {!!ngn && ngn.pending > 0 && !hidden && (
-            <Text style={styles.muted}>{formatMinor('NGN', ngn.pending)} sending</Text>
-          )}
-          {!!error && <Text style={styles.error}>{error}</Text>}
+
+          <View style={{ flexDirection: 'row', gap: space.sm, marginTop: space.sm }}>
+            <Button label="Add money" variant="secondary" style={{ flex: 1 }} onPress={() => router.push('/add-money')} />
+            <Button label="Send" variant="secondary" style={{ flex: 1 }} onPress={() => router.navigate('/pay')} />
+          </View>
         </View>
 
-        <View style={{ flexDirection: 'row', gap: space.sm, marginTop: space.md }}>
-          <Button label="Add money" variant="secondary" style={{ flex: 1 }} onPress={() => router.push('/add-money')} />
-          <Button label="Send" variant="secondary" style={{ flex: 1 }} onPress={() => router.navigate('/pay')} />
-        </View>
-
-        {others.map((b) => (
-          <View key={b.asset} style={[styles.card, styles.row]}>
-            <View style={{ gap: 2 }}>
-              <Text style={styles.body}>{b.asset}</Text>
-              <Text style={[styles.amount, { fontSize: 32, letterSpacing: -1 }]}>
-                {hidden ? HIDDEN : formatMinor(b.asset, b.available)}
-              </Text>
-              <Text style={styles.muted}>
-                {b.pending > 0 && !hidden ? `${formatMinor(b.asset, b.pending)} sending` : ASSET_BLURB[b.asset]}
-              </Text>
+        {/* What the total is made of, naira included. */}
+        <View style={{ paddingHorizontal: space.md, gap: space.md }}>
+          {balances?.map((b) => (
+            <View key={b.asset} style={[styles.card, styles.row]}>
+              <View style={{ gap: 2, flexShrink: 1 }}>
+                <Text style={styles.body}>{b.asset}</Text>
+                <Text style={[styles.amount, { fontSize: 32, letterSpacing: -1 }]} adjustsFontSizeToFit numberOfLines={1}>
+                  {hidden ? HIDDEN : formatBalance(b.asset, b.available)}
+                </Text>
+                <Text style={styles.muted}>
+                  {b.pending > 0 && !hidden
+                    ? `${formatBalance(b.asset, b.pending)} in progress`
+                    : prices && !hidden && b.asset !== fiat
+                      ? `≈ ${formatFiat(fiat, valueOf(fiat, b.asset, b.available, prices))}`
+                      : ASSET_BLURB[b.asset]}
+                </Text>
+              </View>
+              <Button label="Swap" variant="primary" style={{ height: 44 }} onPress={() => router.navigate('/pay')} />
             </View>
-            <Button label="Swap" variant="primary" style={{ height: 44 }} onPress={() => router.navigate('/pay')} />
-          </View>
-        ))}
+          ))}
+        </View>
       </ScrollView>
     </View>
   );

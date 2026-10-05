@@ -76,8 +76,9 @@ is signed: credit > 0, debit < 0, and each entry sums to zero per asset
 | `GET /v1/me`, `PUT /v1/me/tag`, `GET /v1/balances`, `GET /v1/virtual-account`, `POST /v1/transfers` | done |
 | `POST /v1/dev/simulate-deposit`, `POST /v1/dev/fund` (non-production) | done, for local testing |
 | Reconciler: ledger nets to zero, cached balances match postings | done; Bitnob comparison is a TODO |
-| Swaps, payouts, crypto, activity | routes return 501; screens are placeholders |
-| App: phone + OTP, onboarding (name, email, date of birth, BVN, tag), Home, Add money, Send by tag, Profile | done |
+| Swaps: `POST /v1/swaps/quotes`, `POST /v1/swaps`; funds held while the order is out, settled or released after | done, verified with real sandbox trades |
+| `GET /v1/prices`, payouts, crypto, activity | routes return 501; screens are placeholders |
+| App: phone + OTP, onboarding (name, email, date of birth, BVN, tag), Home, Add money, Swap review, Send by tag, Profile | done |
 
 Notes from the sandbox:
 
@@ -85,6 +86,13 @@ Notes from the sandbox:
   success status, so onboarding compares the returned email with the one sent.
 - We never store the BVN: `kyc_records.id_reference` is an HMAC of it under
   `KYC_HASH_KEY`, which is enough to refuse the same BVN twice.
+- Every swap direction is one Bitnob "sell" quote with the amount the user
+  gives up as `quantity`. Quotes last about 30 seconds on NGN pairs and 5
+  minutes on crypto-only pairs. Orders filled immediately in every test.
+- Bitnob checks our own balance with them when quoting, so a swap out of an
+  asset we are not pre-funded in fails with "insufficient balance".
+- Our swap margin is `SWAP_FEE_BPS` (default 50 = 0.5%), taken from what the
+  user receives and posted to `revenue:spread:{asset}`.
 - Bitnob cannot deliver webhooks to localhost, so locally deposits arrive via
   the worker's poll (or instantly via the simulate-deposit button in the app).
 

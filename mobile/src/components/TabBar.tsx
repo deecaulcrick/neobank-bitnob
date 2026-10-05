@@ -4,7 +4,8 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Tabs } from 'expo-router';
 
-import { formatCompactNaira } from '../lib/money';
+import { useMeState } from '../lib/me';
+import { formatCompact, totalValue } from '../lib/money';
 import { useHideBalances } from '../lib/prefs';
 import { useBalancesState } from '../lib/useBalances';
 import { colors, radius, weight } from '../theme';
@@ -16,7 +17,16 @@ export function TabBar({ state, descriptors, navigation }: TabBarProps) {
   const insets = useSafeAreaInsets();
   const onAccent = state.routes[state.index].name === 'pay';
   const hidden = useHideBalances();
-  const ngn = useBalancesState().balances?.find((b) => b.asset === 'NGN');
+  const { balances, prices } = useBalancesState();
+  const fiat = useMeState().me?.display_currency ?? 'NGN';
+  // The same figure as Home's big number; naira alone until rates arrive.
+  const ngn = balances?.find((b) => b.asset === 'NGN');
+  const balanceLabel =
+    balances && prices
+      ? formatCompact(fiat, totalValue(fiat, balances, prices))
+      : ngn
+        ? formatCompact('NGN', ngn.available)
+        : null;
 
   return (
     <View pointerEvents="box-none" style={[styles.wrap, { bottom: Math.max(insets.bottom, 12) }]}>
@@ -37,10 +47,10 @@ export function TabBar({ state, descriptors, navigation }: TabBarProps) {
               style={[styles.item, focused && (onAccent ? styles.itemFocusedOnAccent : styles.itemFocused)]}>
               <View style={!focused && { opacity: 0.5 }}>
                 {route.name === 'index' ? (
-                  // The home tab is the naira balance; a bank icon stands in
-                  // while it is hidden or still loading.
-                  ngn && !hidden ? (
-                    <Text style={styles.balance}>{formatCompactNaira(ngn.available)}</Text>
+                  // The home tab is the balance; a bank icon stands in while
+                  // it is hidden or still loading.
+                  balanceLabel && !hidden ? (
+                    <Text style={styles.balance}>{balanceLabel}</Text>
                   ) : (
                     <Landmark size={26} strokeWidth={2} color={colors.ink} />
                   )
