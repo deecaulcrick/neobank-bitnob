@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/deecaulcrick/neobank/backend/internal/accounts"
 	"github.com/deecaulcrick/neobank/backend/internal/bitnob"
 	"github.com/deecaulcrick/neobank/backend/internal/config"
 	"github.com/deecaulcrick/neobank/backend/internal/jobs"
@@ -34,11 +35,9 @@ func main() {
 	}
 	defer pool.Close()
 
-	j := &jobs.Jobs{
-		Pool:   pool,
-		Bitnob: bitnob.New(cfg.BitnobBaseURL, cfg.BitnobClientID, cfg.BitnobClientSecret),
-		Log:    log,
-	}
+	bn := bitnob.New(cfg.BitnobBaseURL, cfg.BitnobClientID, cfg.BitnobClientSecret)
+	acct := &accounts.Service{Pool: pool, Bitnob: bn, HashKey: cfg.KYCHashKey}
+	j := &jobs.Jobs{Pool: pool, Bitnob: bn, Log: log}
 	processor := webhooks.NewProcessor(pool, log)
 
 	var wg sync.WaitGroup
@@ -48,6 +47,9 @@ func main() {
 	}
 	start(func() { processor.Run(ctx) })
 	start(func() { jobs.Every(ctx, time.Minute, "sweep", log, j.Sweep) })
+	// Catches deposits whose webhook never arrived (always the case locally,
+	// where Bitnob can't reach the receiver).
+	start(func() { jobs.Every(ctx, time.Minute, "sync-deposits", log, acct.SyncAllDeposits) })
 	start(func() { jobs.Every(ctx, 24*time.Hour, "reconcile", log, j.Reconcile) })
 
 	log.Info("worker running")

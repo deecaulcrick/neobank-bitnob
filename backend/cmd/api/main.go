@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/deecaulcrick/neobank/backend/internal/accounts"
 	"github.com/deecaulcrick/neobank/backend/internal/auth"
 	"github.com/deecaulcrick/neobank/backend/internal/bitnob"
 	"github.com/deecaulcrick/neobank/backend/internal/config"
@@ -46,10 +47,12 @@ func run(log *slog.Logger) error {
 		return err
 	}
 
+	bn := bitnob.New(cfg.BitnobBaseURL, cfg.BitnobClientID, cfg.BitnobClientSecret)
 	srv := &httpapi.Server{
 		Cfg:      cfg,
 		Pool:     pool,
-		Bitnob:   bitnob.New(cfg.BitnobBaseURL, cfg.BitnobClientID, cfg.BitnobClientSecret),
+		Bitnob:   bn,
+		Accounts: &accounts.Service{Pool: pool, Bitnob: bn, HashKey: cfg.KYCHashKey},
 		Verifier: verifier,
 		Webhooks: webhooks.NewReceiver(pool, cfg.BitnobWebhookSecret, log),
 		Log:      log,

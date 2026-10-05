@@ -16,12 +16,26 @@ export function useStatusBar(style: 'light' | 'dark') {
   useFocusEffect(useCallback(() => setStatusBarStyle(style, true), [style]));
 }
 
-type ScreenProps = { children: ReactNode; tone?: Tone; style?: ViewStyle; edges?: Edge[] };
+type ScreenProps = {
+  children: ReactNode;
+  tone?: Tone;
+  style?: ViewStyle;
+  edges?: Edge[];
+  // Modal sheets: draws the grabber that signals swipe-down-to-close, and an
+  // optional title, in place of a native header.
+  sheet?: boolean | string;
+};
 
-export function Screen({ children, tone = 'light', style, edges }: ScreenProps) {
+export function Screen({ children, tone = 'light', style, edges, sheet }: ScreenProps) {
   useStatusBar(tone === 'night' ? 'light' : 'dark');
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: TONE_BG[tone] }} edges={edges}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: TONE_BG[tone] }} edges={sheet ? ['bottom'] : edges}>
+      {!!sheet && (
+        <View style={styles.sheetHeader}>
+          <View style={styles.grabber} />
+          {typeof sheet === 'string' && <Text style={styles.sheetTitle}>{sheet}</Text>}
+        </View>
+      )}
       <View style={[{ flex: 1, padding: space.md }, style]}>{children}</View>
     </SafeAreaView>
   );
@@ -85,9 +99,9 @@ export function Chip({ label, selected, onPress, tone = 'light' }: ChipProps) {
 }
 
 // Stand-in for screens whose milestone hasn't been built yet.
-export function ComingSoon({ title, milestone }: { title: string; milestone: string }) {
+export function ComingSoon({ title, milestone, sheet }: { title: string; milestone: string; sheet?: boolean }) {
   return (
-    <Screen style={{ justifyContent: 'center', gap: space.sm }}>
+    <Screen sheet={sheet} style={{ justifyContent: 'center', gap: space.sm }}>
       <Text style={styles.heading}>{title}</Text>
       <Text style={styles.muted}>Lands in {milestone}</Text>
     </Screen>
@@ -111,6 +125,9 @@ export const styles = StyleSheet.create({
   chipLabel: { color: colors.ink, fontSize: 14, fontWeight: weight.medium },
   // Borderless, like typing straight onto the sheet.
   input: { color: colors.ink, fontSize: 22, fontWeight: weight.regular, paddingVertical: space.md },
+  sheetHeader: { alignItems: 'center', paddingTop: 10, gap: 14 },
+  grabber: { width: 44, height: 5, borderRadius: 3, backgroundColor: '#C9CBC5' },
+  sheetTitle: { color: colors.ink, fontSize: 17, fontWeight: weight.medium },
   rule: { height: StyleSheet.hairlineWidth, backgroundColor: colors.line },
   card: { backgroundColor: colors.card, borderRadius: radius.lg, padding: space.lg },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

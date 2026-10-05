@@ -1,10 +1,13 @@
-import { ArrowLeftRight, Clock, House } from 'lucide-react-native';
+import { ArrowLeftRight, Clock, Landmark } from 'lucide-react-native';
 import type { ComponentProps } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Tabs } from 'expo-router';
 
-import { colors, radius } from '../theme';
+import { formatCompactNaira } from '../lib/money';
+import { useHideBalances } from '../lib/prefs';
+import { useBalancesState } from '../lib/useBalances';
+import { colors, radius, weight } from '../theme';
 
 type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>>[0];
 
@@ -12,6 +15,8 @@ type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>
 export function TabBar({ state, descriptors, navigation }: TabBarProps) {
   const insets = useSafeAreaInsets();
   const onAccent = state.routes[state.index].name === 'pay';
+  const hidden = useHideBalances();
+  const ngn = useBalancesState().balances?.find((b) => b.asset === 'NGN');
 
   return (
     <View pointerEvents="box-none" style={[styles.wrap, { bottom: Math.max(insets.bottom, 12) }]}>
@@ -32,7 +37,13 @@ export function TabBar({ state, descriptors, navigation }: TabBarProps) {
               style={[styles.item, focused && (onAccent ? styles.itemFocusedOnAccent : styles.itemFocused)]}>
               <View style={!focused && { opacity: 0.5 }}>
                 {route.name === 'index' ? (
-                  <House size={26} strokeWidth={2} color={colors.ink} />
+                  // The home tab is the naira balance; a bank icon stands in
+                  // while it is hidden or still loading.
+                  ngn && !hidden ? (
+                    <Text style={styles.balance}>{formatCompactNaira(ngn.available)}</Text>
+                  ) : (
+                    <Landmark size={26} strokeWidth={2} color={colors.ink} />
+                  )
                 ) : route.name === 'activity' ? (
                   <Clock size={26} strokeWidth={2} color={colors.ink} />
                 ) : (
@@ -60,6 +71,7 @@ const styles = StyleSheet.create({
   },
   barOnAccent: { backgroundColor: 'transparent' },
   item: { height: 48, minWidth: 92, paddingHorizontal: 18, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
+  balance: { color: colors.ink, fontSize: 19, fontWeight: weight.semibold },
   itemFocused: { backgroundColor: colors.sheet },
   itemFocusedOnAccent: { backgroundColor: colors.onAccentWash },
 });

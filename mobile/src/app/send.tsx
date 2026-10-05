@@ -33,11 +33,11 @@ export default function Send() {
   }
 
   return (
-    <Screen edges={['bottom']}>
+    <Screen sheet>
       <KeyboardAvoidingView
         style={{ flex: 1, justifyContent: 'space-between' }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={100}>
+        keyboardVerticalOffset={40}>
         <View>
           <Text style={styles.heading}>
             Send {pretty} <Text style={{ color: colors.inkMuted }}>to</Text>

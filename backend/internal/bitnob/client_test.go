@@ -32,7 +32,7 @@ func TestDoSignsExactBody(t *testing.T) {
 		if got := r.Header.Get("X-Auth-Signature"); got != want {
 			t.Errorf("signature = %s, want %s", got, want)
 		}
-		w.Write([]byte(`{"ok":true}`))
+		w.Write([]byte(`{"success":true,"data":{"id":"cus_1"}}`))
 	}))
 	defer srv.Close()
 
@@ -40,7 +40,7 @@ func TestDoSignsExactBody(t *testing.T) {
 	c.now = func() time.Time { return time.Unix(1791072000, 0) }
 	c.nonce = func() (string, error) { return "abc", nil }
 
-	if _, err := c.CreateCustomer(context.Background(), CreateCustomerRequest{FirstName: "Dee", Phone: "+2348000000000"}); err != nil {
+	if _, _, err := c.CreateCustomer(context.Background(), CreateCustomerRequest{FirstName: "Dee", PhoneNumber: "8000000000"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.WhoAmI(context.Background()); err != nil {

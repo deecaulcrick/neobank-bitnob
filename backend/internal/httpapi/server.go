@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/deecaulcrick/neobank/backend/internal/accounts"
 	"github.com/deecaulcrick/neobank/backend/internal/auth"
 	"github.com/deecaulcrick/neobank/backend/internal/bitnob"
 	"github.com/deecaulcrick/neobank/backend/internal/config"
@@ -18,6 +19,7 @@ type Server struct {
 	Cfg      config.Config
 	Pool     *pgxpool.Pool
 	Bitnob   *bitnob.Client
+	Accounts *accounts.Service
 	Verifier *auth.Verifier
 	Webhooks http.Handler
 	Log      *slog.Logger
@@ -38,8 +40,8 @@ func (s *Server) Routes() http.Handler {
 	authed("GET /v1/me", s.getMe)
 	authed("PUT /v1/me/tag", s.setTag)
 	authed("GET /v1/balances", s.getBalances)
-	authed("POST /v1/onboarding/kyc", notImplemented)
-	authed("GET /v1/virtual-account", notImplemented)
+	authed("POST /v1/onboarding/kyc", s.submitKYC)
+	authed("GET /v1/virtual-account", s.getVirtualAccount)
 
 	// M2 — swaps
 	authed("GET /v1/prices", notImplemented)
@@ -66,6 +68,8 @@ func (s *Server) Routes() http.Handler {
 	if s.Cfg.Env != "production" {
 		// Credits a fake deposit so the app is usable before Bitnob is wired up.
 		authed("POST /v1/dev/fund", s.devFund)
+		// Pays NGN 1,000 into the user's account through the Bitnob sandbox.
+		authed("POST /v1/dev/simulate-deposit", s.devSimulateDeposit)
 	}
 
 	return s.logRequests(mux)

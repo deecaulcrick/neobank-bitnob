@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/deecaulcrick/neobank/backend/internal/accounts"
 	"github.com/deecaulcrick/neobank/backend/internal/auth"
 	"github.com/deecaulcrick/neobank/backend/internal/ledger"
 	"github.com/deecaulcrick/neobank/backend/internal/money"
@@ -19,6 +20,7 @@ import (
 type meResponse struct {
 	ID              uuid.UUID `json:"id"`
 	Phone           string    `json:"phone"`
+	Email           *string   `json:"email"`
 	Tag             *string   `json:"tag"`
 	FirstName       *string   `json:"first_name"`
 	LastName        *string   `json:"last_name"`
@@ -40,9 +42,9 @@ func (s *Server) ensureUser(ctx context.Context, u auth.User) (meResponse, error
 			return err
 		}
 		return tx.QueryRow(ctx,
-			`select id, phone, tag::text, first_name, last_name, kyc_tier, display_currency
+			`select id, phone, email::text, tag::text, first_name, last_name, kyc_tier, display_currency
 			 from users where id = $1`, u.ID,
-		).Scan(&me.ID, &me.Phone, &me.Tag, &me.FirstName, &me.LastName, &me.KYCTier, &me.DisplayCurrency)
+		).Scan(&me.ID, &me.Phone, &me.Email, &me.Tag, &me.FirstName, &me.LastName, &me.KYCTier, &me.DisplayCurrency)
 	})
 	return me, err
 }
@@ -222,6 +224,60 @@ func (s *Server) devFund(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entry_id": res.EntryID})
+}
+
+// submitKYC is tier-1 onboarding: Bitnob customer, then the NGN account number.
+func (s *Server) submitKYC(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	var in accounts.KYCInput
+	if !readJSON(w, r, &in) {
+		return
+	}
+	if _, err := s.ensureUser(r.Context(), u); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	va, err := s.Accounts.Onboard(r.Context(), u.ID, u.Phone, in)
+	if err != nil {
+		s.accountsError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, va)
+}
+
+func (s *Server) getVirtualAccount(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	va, err := s.Accounts.VirtualAccount(r.Context(), u.ID)
+	if err != nil {
+		s.accountsError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, va)
+}
+
+func (s *Server) devSimulateDeposit(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	if err := s.Accounts.SimulateDeposit(r.Context(), u.ID); err != nil {
+		s.accountsError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "done"})
+}
+
+func (s *Server) accountsError(w http.ResponseWriter, r *http.Request, err error) {
+	var invalid *accounts.ValidationError
+	switch {
+	case errors.As(err, &invalid):
+		writeError(w, http.StatusUnprocessableEntity, invalid.Message)
+	case errors.Is(err, accounts.ErrIdentityInUse):
+		writeError(w, http.StatusConflict, "That BVN or email is already linked to another account.")
+	case errors.Is(err, accounts.ErrNoAccount):
+		writeError(w, http.StatusNotFound, "You don't have an account number yet.")
+	case errors.Is(err, accounts.ErrUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "Account services are not available right now.")
+	default:
+		s.fail(w, r, err)
+	}
 }
 
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {

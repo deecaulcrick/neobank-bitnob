@@ -11,10 +11,12 @@ export default function Profile() {
   const sky = useSkyMode();
 
   return (
-    <Screen edges={['bottom']} style={{ justifyContent: 'space-between' }}>
+    <Screen sheet style={{ justifyContent: 'space-between' }}>
       <View style={{ gap: space.sm }}>
-        <Text style={styles.heading}>{me?.tag ? `@${me.tag}` : 'Your profile'}</Text>
-        <Text style={styles.muted}>{me?.phone ? `+${me.phone.replace(/^\+/, '')}` : ''}</Text>
+        <Text style={styles.heading}>{[me?.first_name, me?.last_name].filter(Boolean).join(' ') || 'Your profile'}</Text>
+        <Text style={styles.muted}>
+          {[me?.tag && `@${me.tag}`, me?.phone && `+${me.phone.replace(/^\+/, '')}`].filter(Boolean).join('  ·  ')}
+        </Text>
         <View style={[styles.card, styles.row, { marginTop: space.md }]}>
           <Text style={styles.body}>KYC tier</Text>
           <Text style={styles.body}>{me?.kyc_tier ?? '—'}</Text>
@@ -26,7 +28,7 @@ export default function Profile() {
             <Chip label="Night" tone="sheet" selected={sky === 'night'} onPress={() => setSkyMode('night')} />
           </View>
         </View>
-        {/* TODO(M1): pick a tag, limits used, upgrade KYC. */}
+        {/* TODO: limits used and upgrade KYC, once tier limits are agreed. */}
       </View>
       <Button label="Sign out" variant="secondary" onPress={() => supabase.auth.signOut()} />
     </Screen>

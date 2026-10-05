@@ -47,3 +47,22 @@ export const ASSET_BLURB: Record<Asset, string> = {
   USDC: 'Dollar savings',
   BTC: 'Long-term holding',
 };
+
+// Short naira balance for the tab bar: ₦500, ₦6.7k, ₦55k, ₦1.2m. Truncates
+// rather than rounds so it never shows more than the user has.
+export function formatCompactNaira(kobo: number): string {
+  const naira = Math.floor(kobo / 100);
+  const units: [number, string][] = [
+    [1e9, 'b'],
+    [1e6, 'm'],
+    [1e3, 'k'],
+  ];
+  for (const [size, suffix] of units) {
+    if (naira >= size) {
+      const tenths = Math.floor((naira / size) * 10) / 10;
+      const text = tenths < 10 && tenths % 1 !== 0 ? tenths.toFixed(1) : String(Math.floor(tenths));
+      return `₦${text}${suffix}`;
+    }
+  }
+  return `₦${naira}`;
+}

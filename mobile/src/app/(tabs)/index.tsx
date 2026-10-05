@@ -1,6 +1,5 @@
 import { router } from 'expo-router';
 import { Eye, EyeOff } from 'lucide-react-native';
-import { useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -10,7 +9,7 @@ import { Button, styles, useStatusBar } from '../../components/ui';
 import { ASSET_BLURB, formatMinor } from '../../lib/money';
 import { useBalances } from '../../lib/useBalances';
 import { useMe } from '../../lib/useMe';
-import { useSkyMode } from '../../lib/prefs';
+import { setHideBalances, useHideBalances, useSkyMode } from '../../lib/prefs';
 import { colors, weight, radius, space, TAB_BAR_SPACE } from '../../theme';
 
 const HIDDEN = '••••';
@@ -20,7 +19,7 @@ export default function Home() {
   const insets = useSafeAreaInsets();
   const { balances, error } = useBalances();
   const me = useMe();
-  const [hidden, setHidden] = useState(false);
+  const hidden = useHideBalances();
   useStatusBar('light');
   const sky = useSkyMode();
 
@@ -57,7 +56,7 @@ export default function Home() {
           <Text style={{ color: colors.white, fontSize: 14, fontWeight: weight.medium }}>Tier {me?.kyc_tier ?? 0}</Text>
         </View>
         <Text style={{ color: colors.white, fontSize: 17, fontWeight: weight.medium, opacity: 0.95 }}>
-          {me?.tag ? `@${me.tag}` : 'No tag yet'}
+          {me?.tag ? `@${me.tag}` : ''}
         </Text>
       </View>
 
@@ -72,7 +71,7 @@ export default function Home() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={hidden ? 'Show balances' : 'Hide balances'}
-              onPress={() => setHidden((h) => !h)}
+              onPress={() => setHideBalances(!hidden)}
               hitSlop={12}>
               {hidden ? (
                 <Eye size={26} strokeWidth={2} color={colors.ink} />

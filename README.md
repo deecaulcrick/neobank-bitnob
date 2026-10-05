@@ -68,14 +68,25 @@ is signed: credit > 0, debit < 0, and each entry sums to zero per asset
 
 | Area | State |
 | --- | --- |
-| Bitnob client: HMAC signing, `whoami`, `balances` | done, tested |
-| Webhook receiver (verify, store-first, dedupe) and queue worker with backoff | done; handlers are stubs |
+| Bitnob client: HMAC signing, `whoami`, `balances` | done, verified against the sandbox |
+| Webhook receiver (verify, store-first, dedupe) and queue worker with backoff | done |
 | Ledger: accounts, idempotent posting, overdraft protection | done, tested against Postgres |
-| `GET /v1/me`, `PUT /v1/me/tag`, `GET /v1/balances`, `POST /v1/transfers` | done |
-| `POST /v1/dev/fund` (non-production) | done, for local testing |
+| Onboarding: `POST /v1/onboarding/kyc` creates the Bitnob customer and NGN account number | done, verified against the sandbox |
+| Deposits: `virtual_account.deposit.success` webhook, plus a once-a-minute poll for missed ones | done; the webhook path is tested with a hand-built payload only |
+| `GET /v1/me`, `PUT /v1/me/tag`, `GET /v1/balances`, `GET /v1/virtual-account`, `POST /v1/transfers` | done |
+| `POST /v1/dev/simulate-deposit`, `POST /v1/dev/fund` (non-production) | done, for local testing |
 | Reconciler: ledger nets to zero, cached balances match postings | done; Bitnob comparison is a TODO |
-| KYC, virtual account, swaps, payouts, crypto, activity | routes return 501; screens are placeholders |
-| App: phone + OTP, Home, Assets, Send by tag, Keypad, Profile | done |
+| Swaps, payouts, crypto, activity | routes return 501; screens are placeholders |
+| App: phone + OTP, onboarding (name, email, date of birth, BVN, tag), Home, Add money, Send by tag, Profile | done |
+
+Notes from the sandbox:
+
+- Bitnob answers a duplicate BVN or email with the existing customer and a
+  success status, so onboarding compares the returned email with the one sent.
+- We never store the BVN: `kyc_records.id_reference` is an HMAC of it under
+  `KYC_HASH_KEY`, which is enough to refuse the same BVN twice.
+- Bitnob cannot deliver webhooks to localhost, so locally deposits arrive via
+  the worker's poll (or instantly via the simulate-deposit button in the app).
 
 Bitnob endpoint paths marked `UNVERIFIED` in
 [backend/internal/bitnob/endpoints.go](backend/internal/bitnob/endpoints.go)

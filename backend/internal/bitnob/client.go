@@ -28,6 +28,10 @@ type Client struct {
 	nonce func() (string, error)
 }
 
+// Configured reports whether credentials were supplied. They are optional in
+// development, so callers that need Bitnob should check first.
+func (c *Client) Configured() bool { return c.clientID != "" && c.clientSecret != "" }
+
 func New(baseURL, clientID, clientSecret string) *Client {
 	return &Client{
 		baseURL:      baseURL,
@@ -47,6 +51,15 @@ type APIError struct {
 
 func (e *APIError) Error() string {
 	return fmt.Sprintf("bitnob: http %d: %s", e.Status, e.Body)
+}
+
+// Detail is Bitnob's human-readable explanation, when the body carries one.
+func (e *APIError) Detail() string {
+	var problem struct {
+		Detail string `json:"detail"`
+	}
+	json.Unmarshal([]byte(e.Body), &problem)
+	return problem.Detail
 }
 
 // Sign returns the hex HMAC-SHA256 of "CLIENT_ID:TIMESTAMP:NONCE:PAYLOAD".
@@ -117,4 +130,11 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 		return fmt.Errorf("bitnob: decode response: %w", err)
 	}
 	return nil
+}
+
+// Raw sends a signed request to any path and returns the response body.
+// For endpoints that don't have a typed method yet.
+func (c *Client) Raw(ctx context.Context, method, path string, in any) (json.RawMessage, error) {
+	var out json.RawMessage
+	return out, c.do(ctx, method, path, in, &out)
 }

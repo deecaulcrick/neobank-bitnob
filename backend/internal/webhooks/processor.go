@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/deecaulcrick/neobank/backend/internal/accounts"
 )
 
 // Event is one stored webhook. Handlers dispatch on Event (the event name),
@@ -36,8 +40,8 @@ type Processor struct {
 func NewProcessor(pool *pgxpool.Pool, log *slog.Logger) *Processor {
 	p := &Processor{pool: pool, log: log, handlers: map[string]Handler{}}
 
-	// M1. Event name still to be confirmed with Bitnob (spec open question).
-	// p.Handle("virtualaccount.deposit", p.ngnDeposit)
+	// M1
+	p.Handle("virtual_account.deposit.success", ngnDeposit)
 
 	// M2
 	p.Handle("trade.completed", notImplemented)
@@ -54,6 +58,37 @@ func NewProcessor(pool *pgxpool.Pool, log *slog.Logger) *Processor {
 func (p *Processor) Handle(event string, h Handler) { p.handlers[event] = h }
 
 func notImplemented(context.Context, pgx.Tx, Event) error { return ErrNotImplemented }
+
+// ngnDeposit credits a bank transfer into a user's virtual account.
+// Payload fields are from Bitnob's docs; the sandbox could not deliver one to
+// a local machine, so this path is untested against a real delivery.
+func ngnDeposit(ctx context.Context, tx pgx.Tx, ev Event) error {
+	var body struct {
+		Payload struct {
+			Amount              string `json:"amount"` // kobo
+			Currency            string `json:"currency"`
+			VirtualAccountID    string `json:"virtual_account_id"`
+			LedgerTransactionID string `json:"ledger_transaction_id"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(ev.Payload, &body); err != nil {
+		return err
+	}
+	p := body.Payload
+	if p.Currency != "NGN" {
+		return fmt.Errorf("webhooks: deposit in unexpected currency %q", p.Currency)
+	}
+	kobo, err := strconv.ParseInt(p.Amount, 10, 64)
+	if err != nil {
+		return fmt.Errorf("webhooks: deposit amount %q", p.Amount)
+	}
+	return accounts.ApplyDeposit(ctx, tx, accounts.Deposit{
+		LedgerTransactionID: p.LedgerTransactionID,
+		BitnobAccountID:     p.VirtualAccountID,
+		AmountKobo:          kobo,
+		Raw:                 ev.Payload,
+	})
+}
 
 // Run drains the queue until ctx is cancelled.
 func (p *Processor) Run(ctx context.Context) {

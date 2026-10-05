@@ -24,6 +24,9 @@ type Config struct {
 	BitnobClientID      string
 	BitnobClientSecret  string
 	BitnobWebhookSecret string
+
+	// Key for the HMAC that stands in for a BVN in our database.
+	KYCHashKey string
 }
 
 func Load() (Config, error) {
@@ -37,6 +40,7 @@ func Load() (Config, error) {
 		BitnobClientID:      os.Getenv("BITNOB_CLIENT_ID"),
 		BitnobClientSecret:  os.Getenv("BITNOB_CLIENT_SECRET"),
 		BitnobWebhookSecret: os.Getenv("BITNOB_WEBHOOK_SECRET"),
+		KYCHashKey:          os.Getenv("KYC_HASH_KEY"),
 	}
 
 	var missing []string
@@ -59,8 +63,15 @@ func Load() (Config, error) {
 	if len(missing) > 0 {
 		return c, fmt.Errorf("missing required env: %s", strings.Join(missing, ", "))
 	}
-	if c.Env == "production" && c.BitnobWebhookSecret == "" {
-		return c, errors.New("BITNOB_WEBHOOK_SECRET is required in production")
+	if c.Env == "production" {
+		if c.BitnobWebhookSecret == "" {
+			return c, errors.New("BITNOB_WEBHOOK_SECRET is required in production")
+		}
+		if c.KYCHashKey == "" {
+			return c, errors.New("KYC_HASH_KEY is required in production")
+		}
+	} else if c.KYCHashKey == "" {
+		c.KYCHashKey = "development-only-kyc-hash-key"
 	}
 	return c, nil
 }
