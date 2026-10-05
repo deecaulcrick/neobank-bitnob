@@ -80,6 +80,62 @@ export type SwapTrade = {
   to_amount: number;
 };
 
+export type PayoutCountry = {
+  code: string;
+  name: string;
+  flag: string;
+  corridors: { currency: string; rails: string[] }[];
+};
+
+// One input on a rail's recipient form, as Bitnob defines it.
+export type PayoutField = {
+  key: string;
+  label: string;
+  required: boolean;
+  component: string; // 'text' | 'select' | ...
+  pattern?: string;
+  description?: string;
+  placeholder?: string;
+  options: { label: string; value: string }[];
+  options_ref?: string; // 'banks': choose from the rail's bank list
+};
+
+export type PayoutRail = {
+  label: string;
+  fields: PayoutField[];
+  banks?: { name: string; code: string }[];
+  limits?: { min_amount: string; max_amount: string; currency: string };
+};
+
+export type PayoutCountryDetails = { code: string; name: string; flag: string; rails: Record<string, PayoutRail> };
+
+export type PayoutBeneficiary = { rail: string; account_name: string; fields: Record<string, string> };
+
+export type SavedBeneficiary = PayoutBeneficiary & { id: string; country: string; currency: string };
+
+export type PayoutQuote = {
+  id: string;
+  from_asset: Asset;
+  from_amount: number; // everything the user pays, fee included
+  fee_amount: number;
+  country: string;
+  to_currency: string;
+  to_amount: number; // hundredths of to_currency
+  rate: string;
+  expires_at: string;
+  enough_funds: boolean;
+};
+
+export type Payout = {
+  id: string;
+  status: 'processing' | 'success' | 'expired' | 'failed';
+  from_asset: Asset;
+  from_amount: number;
+  to_currency: string;
+  to_amount: number;
+  beneficiary_name: string;
+};
+
 export type Balance = { asset: Asset; available: number; pending: number; decimals: number };
 
 export const api = {
@@ -94,6 +150,18 @@ export const api = {
   swapQuote: (input: { from: Asset; to: Asset; amount: string }) =>
     request<SwapQuote>('POST', '/v1/swaps/quotes', input),
   swap: (quoteId: string) => request<SwapTrade>('POST', '/v1/swaps', { quote_id: quoteId }),
+  payoutCountries: () => request<{ countries: PayoutCountry[] }>('GET', '/v1/payouts/countries'),
+  payoutCountry: (code: string) => request<PayoutCountryDetails>('GET', `/v1/payouts/countries/${code}`),
+  payoutLookup: (country: string, rail: string, provider: string, account: string) =>
+    request<{ account_name: string }>(
+      'GET',
+      `/v1/payouts/account-lookup?country=${country}&rail=${rail}&provider=${encodeURIComponent(provider)}&account=${encodeURIComponent(account)}`,
+    ),
+  beneficiaries: () => request<{ beneficiaries: SavedBeneficiary[] }>('GET', '/v1/beneficiaries'),
+  payoutQuote: (input: { country: string; currency: string; from_asset: Asset; amount: string }) =>
+    request<PayoutQuote>('POST', '/v1/payouts/quotes', input),
+  sendPayout: (input: { quote_id: string; beneficiary: PayoutBeneficiary; payment_reason: string }) =>
+    request<Payout>('POST', '/v1/payouts', input),
   transfer: (input: { to_tag: string; asset: Asset; amount: string; idempotency_key: string }) =>
     request<{ entry_id: string; status: string }>('POST', '/v1/transfers', input),
   // Development only: pays NGN 1,000 in through the Bitnob sandbox.

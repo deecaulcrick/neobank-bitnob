@@ -14,6 +14,7 @@ import (
 	"github.com/deecaulcrick/neobank/backend/internal/bitnob"
 	"github.com/deecaulcrick/neobank/backend/internal/config"
 	"github.com/deecaulcrick/neobank/backend/internal/jobs"
+	"github.com/deecaulcrick/neobank/backend/internal/payouts"
 	"github.com/deecaulcrick/neobank/backend/internal/store"
 	"github.com/deecaulcrick/neobank/backend/internal/swaps"
 	"github.com/deecaulcrick/neobank/backend/internal/webhooks"
@@ -39,6 +40,7 @@ func main() {
 	bn := bitnob.New(cfg.BitnobBaseURL, cfg.BitnobClientID, cfg.BitnobClientSecret)
 	acct := &accounts.Service{Pool: pool, Bitnob: bn, HashKey: cfg.KYCHashKey}
 	swap := &swaps.Service{Pool: pool, Bitnob: bn, FeeBps: cfg.SwapFeeBps, Log: log}
+	pay := &payouts.Service{Pool: pool, Bitnob: bn, FeeBps: cfg.PayoutFeeBps, Log: log}
 	j := &jobs.Jobs{Pool: pool, Bitnob: bn, Log: log}
 	processor := webhooks.NewProcessor(pool, log)
 
@@ -50,6 +52,7 @@ func main() {
 	start(func() { processor.Run(ctx) })
 	start(func() { jobs.Every(ctx, time.Minute, "sweep", log, j.Sweep) })
 	start(func() { jobs.Every(ctx, 30*time.Second, "sweep-swaps", log, swap.Sweep) })
+	start(func() { jobs.Every(ctx, 30*time.Second, "sweep-payouts", log, pay.Sweep) })
 	// Catches deposits whose webhook never arrived (always the case locally,
 	// where Bitnob can't reach the receiver).
 	start(func() { jobs.Every(ctx, time.Minute, "sync-deposits", log, acct.SyncAllDeposits) })

@@ -16,6 +16,7 @@ import (
 	"github.com/deecaulcrick/neobank/backend/internal/bitnob"
 	"github.com/deecaulcrick/neobank/backend/internal/config"
 	"github.com/deecaulcrick/neobank/backend/internal/httpapi"
+	"github.com/deecaulcrick/neobank/backend/internal/payouts"
 	"github.com/deecaulcrick/neobank/backend/internal/prices"
 	"github.com/deecaulcrick/neobank/backend/internal/store"
 	"github.com/deecaulcrick/neobank/backend/internal/swaps"
@@ -55,6 +56,7 @@ func run(log *slog.Logger) error {
 		Pool:     pool,
 		Bitnob:   bn,
 		Accounts: &accounts.Service{Pool: pool, Bitnob: bn, HashKey: cfg.KYCHashKey},
+		Payouts:  &payouts.Service{Pool: pool, Bitnob: bn, FeeBps: cfg.PayoutFeeBps, Log: log},
 		Prices:   &prices.Service{Bitnob: bn, TTL: time.Minute},
 		Swaps:    &swaps.Service{Pool: pool, Bitnob: bn, FeeBps: cfg.SwapFeeBps, Log: log},
 		Verifier: verifier,

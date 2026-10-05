@@ -13,6 +13,7 @@ import (
 	"github.com/deecaulcrick/neobank/backend/internal/auth"
 	"github.com/deecaulcrick/neobank/backend/internal/bitnob"
 	"github.com/deecaulcrick/neobank/backend/internal/config"
+	"github.com/deecaulcrick/neobank/backend/internal/payouts"
 	"github.com/deecaulcrick/neobank/backend/internal/prices"
 	"github.com/deecaulcrick/neobank/backend/internal/swaps"
 )
@@ -24,6 +25,7 @@ type Server struct {
 	Accounts *accounts.Service
 	Swaps    *swaps.Service
 	Prices   *prices.Service
+	Payouts  *payouts.Service
 	Verifier *auth.Verifier
 	Webhooks http.Handler
 	Log      *slog.Logger
@@ -54,12 +56,13 @@ func (s *Server) Routes() http.Handler {
 	authed("POST /v1/swaps", s.executeSwap)
 
 	// M3 — payouts
-	authed("GET /v1/payouts/countries", notImplemented)
-	authed("GET /v1/payouts/countries/{country}", notImplemented)
-	authed("GET /v1/beneficiaries", notImplemented)
-	authed("POST /v1/beneficiaries", notImplemented)
-	authed("POST /v1/payouts/quotes", notImplemented)
-	authed("POST /v1/payouts", notImplemented)
+	authed("GET /v1/payouts/countries", s.payoutCountries)
+	authed("GET /v1/payouts/countries/{country}", s.payoutCountry)
+	authed("GET /v1/payouts/account-lookup", s.payoutAccountLookup)
+	authed("GET /v1/beneficiaries", s.listBeneficiaries)
+	authed("POST /v1/payouts/quotes", s.createPayoutQuote)
+	authed("POST /v1/payouts", s.sendPayout)
+	authed("GET /v1/payouts/{id}", s.getPayout)
 
 	// M4 — crypto in/out
 	authed("POST /v1/crypto/addresses", notImplemented)

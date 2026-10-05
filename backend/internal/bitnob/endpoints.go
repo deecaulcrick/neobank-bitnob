@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -232,39 +233,90 @@ func (c *Client) ListOrders(ctx context.Context) ([]Order, error) {
 }
 
 // --- M3: payouts -----------------------------------------------------------
+// Shapes confirmed against the sandbox.
 
-// SupportedCountries is the live corridor list; never hardcode it. UNVERIFIED path.
+// SupportedCountries is the live corridor list; never hardcode it.
 func (c *Client) SupportedCountries(ctx context.Context) (json.RawMessage, error) {
-	var out json.RawMessage
-	return out, c.do(ctx, http.MethodGet, "/api/payouts/countries", nil, &out)
+	return c.Raw(ctx, http.MethodGet, "/api/payouts/supported-countries", nil)
 }
 
-// CountryDetails returns the beneficiary fields for a country. UNVERIFIED path.
+// CountryDetails returns, per rail, the beneficiary fields to collect, the
+// bank directory and the amount limits.
 func (c *Client) CountryDetails(ctx context.Context, country string) (json.RawMessage, error) {
-	var out json.RawMessage
-	return out, c.do(ctx, http.MethodGet, "/api/payouts/countries/"+country, nil, &out)
+	return c.Raw(ctx, http.MethodGet, "/api/payouts/supported-countries/"+url.PathEscape(country), nil)
 }
 
-func (c *Client) CreatePayoutQuote(ctx context.Context, in any) (json.RawMessage, error) {
-	var out json.RawMessage
-	return out, c.do(ctx, http.MethodPost, "/api/payouts/quotes", in, &out)
+// AccountLookup resolves the name on a Nigerian bank account or a Ghanaian
+// mobile-money wallet. query carries country, bank_code, account_number and,
+// for mobile money, type.
+func (c *Client) AccountLookup(ctx context.Context, query url.Values) (json.RawMessage, error) {
+	return c.Raw(ctx, http.MethodGet, "/api/payouts/account-lookup?"+query.Encode(), nil)
 }
 
-// InitializePayout and FinalizePayout: UNVERIFIED paths.
-func (c *Client) InitializePayout(ctx context.Context, in any) (json.RawMessage, error) {
-	var out json.RawMessage
-	return out, c.do(ctx, http.MethodPost, "/api/payouts/initialize", in, &out)
+// PayoutQuoteRequest sets either Amount (in FromAsset) or SettlementAmount (in
+// ToCurrency). FromAsset may be NGN, USDT, USDC or BTC.
+type PayoutQuoteRequest struct {
+	Amount           string `json:"amount,omitempty"`
+	SettlementAmount string `json:"settlement_amount,omitempty"`
+	Country          string `json:"country"`
+	FromAsset        string `json:"from_asset"`
+	ToCurrency       string `json:"to_currency"`
+	Source           string `json:"source"` // "offchain": paid from our Bitnob balance
+	Reference        string `json:"reference"`
 }
 
-func (c *Client) FinalizePayout(ctx context.Context, in any) (json.RawMessage, error) {
-	var out json.RawMessage
-	return out, c.do(ctx, http.MethodPost, "/api/payouts/finalize", in, &out)
+// Payout is Bitnob's payout record. Status runs QUOTE, INITIATED, PENDING,
+// then SUCCESS, FAILED or EXPIRED. Amounts are decimal strings in major units.
+type Payout struct {
+	ID      string `json:"id"`       // UUID; used to fetch the payout
+	QuoteID string `json:"quote_id"` // used in the initialize/finalize paths
+	Status  string `json:"status"`
+	// TotalAmount is what leaves our balance, in FromAsset, fees included.
+	TotalAmount      string    `json:"total_amount"`
+	SettlementAmount string    `json:"settlement_amount"`
+	Reference        string    `json:"reference"`
+	ExpiresAt        time.Time `json:"expires_at"`
 }
 
-// GetPayout is what the sweeper polls for missed webhooks. UNVERIFIED path.
-func (c *Client) GetPayout(ctx context.Context, id string) (json.RawMessage, error) {
-	var out json.RawMessage
-	return out, c.do(ctx, http.MethodGet, "/api/payouts/"+id, nil, &out)
+func (c *Client) payout(ctx context.Context, method, path string, in any) (Payout, json.RawMessage, error) {
+	raw, err := c.Raw(ctx, method, path, in)
+	if err != nil {
+		return Payout{}, nil, err
+	}
+	var env envelope[struct {
+		Payout Payout `json:"payout"`
+	}]
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return Payout{}, nil, err
+	}
+	return env.Data.Payout, raw, nil
+}
+
+// CreatePayoutQuote locks a rate (about 16 minutes on stablecoin and NGN
+// sources, 6 on BTC; read ExpiresAt).
+func (c *Client) CreatePayoutQuote(ctx context.Context, in PayoutQuoteRequest) (Payout, json.RawMessage, error) {
+	return c.payout(ctx, http.MethodPost, "/api/payouts/quotes", in)
+}
+
+// InitializePayout attaches the beneficiary. beneficiary is destination_type
+// and country plus the rail's field keys exactly as Country Details names them.
+func (c *Client) InitializePayout(ctx context.Context, quoteID, reference, reason string, beneficiary map[string]any) (Payout, json.RawMessage, error) {
+	return c.payout(ctx, http.MethodPost, "/api/payouts/"+url.PathEscape(quoteID)+"/initialize", map[string]any{
+		"quote_id":       quoteID,
+		"reference":      reference,
+		"payment_reason": reason,
+		"beneficiary":    beneficiary,
+	})
+}
+
+// FinalizePayout commits the payout; funds leave our balance.
+func (c *Client) FinalizePayout(ctx context.Context, quoteID string) (Payout, json.RawMessage, error) {
+	return c.payout(ctx, http.MethodPost, "/api/payouts/"+url.PathEscape(quoteID)+"/finalize", nil)
+}
+
+// GetPayout fetches by Payout.ID. It is what the sweeper polls.
+func (c *Client) GetPayout(ctx context.Context, id string) (Payout, json.RawMessage, error) {
+	return c.payout(ctx, http.MethodGet, "/api/payouts/"+url.PathEscape(id), nil)
 }
 
 // --- M4: crypto in/out -----------------------------------------------------

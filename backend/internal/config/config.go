@@ -31,6 +31,8 @@ type Config struct {
 
 	// Our margin on a swap, in basis points of what the user receives.
 	SwapFeeBps int64
+	// Our fee on a payout, in basis points of the amount sent.
+	PayoutFeeBps int64
 }
 
 func Load() (Config, error) {
@@ -46,14 +48,19 @@ func Load() (Config, error) {
 		BitnobWebhookSecret: os.Getenv("BITNOB_WEBHOOK_SECRET"),
 		KYCHashKey:          os.Getenv("KYC_HASH_KEY"),
 		SwapFeeBps:          50,
+		PayoutFeeBps:        100,
 	}
 
-	if v := os.Getenv("SWAP_FEE_BPS"); v != "" {
+	for name, dst := range map[string]*int64{"SWAP_FEE_BPS": &c.SwapFeeBps, "PAYOUT_FEE_BPS": &c.PayoutFeeBps} {
+		v := os.Getenv(name)
+		if v == "" {
+			continue
+		}
 		bps, err := strconv.ParseInt(v, 10, 64)
 		if err != nil || bps < 0 || bps > 1000 {
-			return c, errors.New("SWAP_FEE_BPS must be a whole number from 0 to 1000")
+			return c, fmt.Errorf("%s must be a whole number from 0 to 1000", name)
 		}
-		c.SwapFeeBps = bps
+		*dst = bps
 	}
 
 	var missing []string

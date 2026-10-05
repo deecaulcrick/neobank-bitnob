@@ -115,7 +115,8 @@ export default function Home() {
                 <Text style={styles.muted}>
                   {b.pending > 0 && !hidden
                     ? `${formatBalance(b.asset, b.pending)} in progress`
-                    : prices && !hidden && b.asset !== fiat
+                    : // A dollar stablecoin's value in dollars would just repeat the line above.
+                      prices && !hidden && b.asset !== fiat && !(fiat === 'USD' && b.asset !== 'BTC' && b.asset !== 'NGN')
                       ? `≈ ${formatFiat(fiat, valueOf(fiat, b.asset, b.available, prices))}`
                       : ASSET_BLURB[b.asset]}
                 </Text>

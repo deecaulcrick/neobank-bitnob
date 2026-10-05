@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/deecaulcrick/neobank/backend/internal/accounts"
+	"github.com/deecaulcrick/neobank/backend/internal/payouts"
 	"github.com/deecaulcrick/neobank/backend/internal/swaps"
 )
 
@@ -48,10 +49,10 @@ func NewProcessor(pool *pgxpool.Pool, log *slog.Logger) *Processor {
 	p.Handle("trade.completed", trade)
 	p.Handle("trade.failed", trade)
 	// M3
-	p.Handle("payouts.initialized", notImplemented)
-	p.Handle("payouts.processing", notImplemented)
-	p.Handle("payouts.withdrawal.success", notImplemented)
-	p.Handle("payouts.withdrawal.expired", notImplemented)
+	p.Handle("payouts.initialized", payout)
+	p.Handle("payouts.processing", payout)
+	p.Handle("payouts.withdrawal.success", payout)
+	p.Handle("payouts.withdrawal.expired", payout)
 	// M4
 	p.Handle("transfer.success", notImplemented)
 	return p
@@ -60,6 +61,11 @@ func NewProcessor(pool *pgxpool.Pool, log *slog.Logger) *Processor {
 func (p *Processor) Handle(event string, h Handler) { p.handlers[event] = h }
 
 func notImplemented(context.Context, pgx.Tx, Event) error { return ErrNotImplemented }
+
+// payout advances, settles or releases a payout by event name.
+func payout(ctx context.Context, tx pgx.Tx, ev Event) error {
+	return payouts.ApplyWebhook(ctx, tx, ev.Event, ev.Payload)
+}
 
 // trade settles or releases a swap. Like ngnDeposit, it has not yet seen a
 // real delivery; the sweeper covers it if the payload shape is off.

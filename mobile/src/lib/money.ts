@@ -106,3 +106,9 @@ export function formatBalance(asset: Asset, minor: number): string {
   }
   return formatMinor(asset, minor);
 }
+
+// An amount in any payout currency, given in hundredths: ₦1,352.57, GHS 50.00.
+export function formatCurrency(currency: string, hundredths: number): string {
+  if (currency === 'NGN' || currency === 'USD') return formatFiat(currency, hundredths);
+  return `${currency} ${formatFiat('NGN', hundredths).slice(1)}`;
+}

@@ -15,6 +15,7 @@ import (
 	"github.com/deecaulcrick/neobank/backend/internal/auth"
 	"github.com/deecaulcrick/neobank/backend/internal/ledger"
 	"github.com/deecaulcrick/neobank/backend/internal/money"
+	"github.com/deecaulcrick/neobank/backend/internal/payouts"
 	"github.com/deecaulcrick/neobank/backend/internal/swaps"
 )
 
@@ -380,6 +381,130 @@ func (s *Server) swapError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusNotFound, "We couldn't find that quote.")
 	case errors.Is(err, swaps.ErrUnavailable):
 		writeError(w, http.StatusServiceUnavailable, "This swap isn't available right now. Try again later.")
+	default:
+		s.fail(w, r, err)
+	}
+}
+
+func (s *Server) payoutCountries(w http.ResponseWriter, r *http.Request) {
+	countries, err := s.Payouts.Countries(r.Context())
+	if err != nil {
+		s.payoutError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"countries": countries})
+}
+
+func (s *Server) payoutCountry(w http.ResponseWriter, r *http.Request) {
+	details, err := s.Payouts.CountryDetails(r.Context(), r.PathValue("country"))
+	if err != nil {
+		s.payoutError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(details)
+}
+
+func (s *Server) payoutAccountLookup(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	name, err := s.Payouts.LookupAccount(r.Context(), q.Get("country"), q.Get("rail"), q.Get("provider"), q.Get("account"))
+	if err != nil {
+		s.payoutError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"account_name": name})
+}
+
+func (s *Server) listBeneficiaries(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	list, err := s.Payouts.Beneficiaries(r.Context(), u.ID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"beneficiaries": list})
+}
+
+// createPayoutQuote locks a payout rate. Send either amount (what the user
+// pays, in from_asset) or settlement_amount (what the recipient gets).
+func (s *Server) createPayoutQuote(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	var in struct {
+		Country          string `json:"country"`
+		Currency         string `json:"currency"`
+		FromAsset        string `json:"from_asset"`
+		Amount           string `json:"amount"`
+		SettlementAmount string `json:"settlement_amount"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	from, err := money.ParseAsset(in.FromAsset)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	qi := payouts.QuoteInput{Country: in.Country, ToCurrency: in.Currency, FromAsset: from, SettlementAmount: in.SettlementAmount}
+	if in.Amount != "" {
+		if qi.Amount, err = money.Parse(from, in.Amount); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid amount")
+			return
+		}
+	}
+	q, err := s.Payouts.CreateQuote(r.Context(), u.ID, qi)
+	if err != nil {
+		s.payoutError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, q)
+}
+
+// sendPayout commits a quoted payout. The status comes back "processing"
+// until the rail confirms.
+func (s *Server) sendPayout(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	var in payouts.SendInput
+	if !readJSON(w, r, &in) {
+		return
+	}
+	p, err := s.Payouts.Send(r.Context(), u.ID, in)
+	if err != nil {
+		s.payoutError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (s *Server) getPayout(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "We couldn't find that payout.")
+		return
+	}
+	p, err := s.Payouts.Get(r.Context(), u.ID, id)
+	if err != nil {
+		s.payoutError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (s *Server) payoutError(w http.ResponseWriter, r *http.Request, err error) {
+	var invalid *payouts.ValidationError
+	switch {
+	case errors.As(err, &invalid):
+		writeError(w, http.StatusUnprocessableEntity, invalid.Message)
+	case errors.Is(err, ledger.ErrInsufficientFunds):
+		writeError(w, http.StatusUnprocessableEntity, "You don't have enough to send this.")
+	case errors.Is(err, payouts.ErrQuoteExpired):
+		writeError(w, http.StatusGone, "That rate expired. Here's a fresh one.")
+	case errors.Is(err, payouts.ErrQuoteUsed):
+		writeError(w, http.StatusConflict, "That payout was already submitted.")
+	case errors.Is(err, payouts.ErrQuoteNotFound), errors.Is(err, payouts.ErrPayoutNotFound):
+		writeError(w, http.StatusNotFound, "We couldn't find that payout.")
+	case errors.Is(err, payouts.ErrUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "Sending abroad isn't available right now. Try again later.")
 	default:
 		s.fail(w, r, err)
 	}

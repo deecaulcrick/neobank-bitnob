@@ -69,7 +69,11 @@ export default function Send() {
 
         <View style={{ gap: space.sm }}>
           <Text style={styles.muted}>Or send out</Text>
-          <Button label="Send abroad" variant="secondary" onPress={() => router.push('/payout-setup')} />
+          <Button
+            label="Bank or mobile money"
+            variant="secondary"
+            onPress={() => router.push({ pathname: '/payout-setup', params: { asset, amount } })}
+          />
           <Button label="Send crypto" variant="secondary" onPress={() => router.push('/receive')} />
         </View>
       </KeyboardAvoidingView>

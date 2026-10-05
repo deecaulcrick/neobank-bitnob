@@ -77,8 +77,10 @@ is signed: credit > 0, debit < 0, and each entry sums to zero per asset
 | `POST /v1/dev/simulate-deposit`, `POST /v1/dev/fund` (non-production) | done, for local testing |
 | Reconciler: ledger nets to zero, cached balances match postings | done; Bitnob comparison is a TODO |
 | Swaps: `POST /v1/swaps/quotes`, `POST /v1/swaps`; funds held while the order is out, settled or released after | done, verified with real sandbox trades |
-| `GET /v1/prices`, payouts, crypto, activity | routes return 501; screens are placeholders |
-| App: phone + OTP, onboarding (name, email, date of birth, BVN, tag), Home, Add money, Swap review, Send by tag, Profile | done |
+| Prices: `GET /v1/prices` (indicative, display only) and per-user display currency | done |
+| Payouts: countries, per-rail recipient forms, account lookup, quote, send, status, saved recipients; funds held until the rail confirms | done, verified with sandbox payouts to a Nigerian bank and Ghanaian mobile money |
+| Crypto in/out, activity | routes return 501; screens are placeholders |
+| App: phone + OTP, onboarding (name, email, date of birth, BVN, tag), Home, Add money, Swap review, Send by tag, Send to bank or mobile money, Profile | done |
 
 Notes from the sandbox:
 
@@ -93,11 +95,20 @@ Notes from the sandbox:
   asset we are not pre-funded in fails with "insufficient balance".
 - Our swap margin is `SWAP_FEE_BPS` (default 50 = 0.5%), taken from what the
   user receives and posted to `revenue:spread:{asset}`.
+- Payout quotes accept NGN, USDT, USDC and BTC as the source, so no swap is
+  chained in front of a payout. A payout is quote, initialize (with the
+  beneficiary), finalize; the record then goes PENDING/PROCESSING to SUCCESS.
+- The recipient form is rendered from Get Country Details. Rails with nested
+  sender/beneficiary blocks (SWIFT, wire, ACH, SEPA) are filtered out for now,
+  which leaves bank, mobile money, paybill and till.
+- Our payout fee is `PAYOUT_FEE_BPS` (default 100 = 1%), charged on top in the
+  source asset and posted to `revenue:fees:{asset}` on success.
+- Webhook signatures are hex HMAC-SHA512 of the raw body in
+  `x-bitnob-signature`; real `payouts.*` deliveries verify with this.
 - Bitnob cannot deliver webhooks to localhost, so locally deposits arrive via
   the worker's poll (or instantly via the simulate-deposit button in the app).
 
 Bitnob endpoint paths marked `UNVERIFIED` in
 [backend/internal/bitnob/endpoints.go](backend/internal/bitnob/endpoints.go)
-come from the brief and must be checked against the API reference. The webhook
-signature is assumed to be hex HMAC-SHA512 of the raw body in
-`x-bitnob-signature`; confirm with a sandbox event.
+come from the brief and must be checked against the API reference (only the
+M4 crypto calls remain).
