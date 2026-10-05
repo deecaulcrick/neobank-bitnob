@@ -1,4 +1,5 @@
 import * as Clipboard from 'expo-clipboard';
+import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Share, Text, View } from 'react-native';
 
@@ -73,6 +74,7 @@ export default function AddMoney() {
           {__DEV__ && (
             <Button label="Simulate ₦1,000 deposit" variant="secondary" onPress={simulate} loading={simulating} />
           )}
+          <Button label="Receive crypto instead" variant="secondary" onPress={() => router.push('/receive')} />
           <Button
             label="Share details"
             variant="secondary"

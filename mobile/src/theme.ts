@@ -7,7 +7,8 @@ export const colors = {
   ink: '#0B0D0C',
   inkMuted: '#6B716C',
   line: '#E2E3DE',
-  accent: '#B6F36A',
+  accent: '#f8e347',
+  // accent: '#B6F36A',
   onAccentWash: 'rgba(11, 13, 12, 0.09)', // buttons and chips drawn on the accent
   onNightWash: 'rgba(255, 255, 255, 0.1)',
   onDayWash: 'rgba(8, 32, 84, 0.26)', // the same strip over the bright day sky

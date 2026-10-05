@@ -13,6 +13,7 @@ import (
 	"github.com/deecaulcrick/neobank/backend/internal/auth"
 	"github.com/deecaulcrick/neobank/backend/internal/bitnob"
 	"github.com/deecaulcrick/neobank/backend/internal/config"
+	"github.com/deecaulcrick/neobank/backend/internal/crypto"
 	"github.com/deecaulcrick/neobank/backend/internal/payouts"
 	"github.com/deecaulcrick/neobank/backend/internal/prices"
 	"github.com/deecaulcrick/neobank/backend/internal/swaps"
@@ -26,6 +27,7 @@ type Server struct {
 	Swaps    *swaps.Service
 	Prices   *prices.Service
 	Payouts  *payouts.Service
+	Crypto   *crypto.Service
 	Verifier *auth.Verifier
 	Webhooks http.Handler
 	Log      *slog.Logger
@@ -65,8 +67,10 @@ func (s *Server) Routes() http.Handler {
 	authed("GET /v1/payouts/{id}", s.getPayout)
 
 	// M4 — crypto in/out
-	authed("POST /v1/crypto/addresses", notImplemented)
-	authed("POST /v1/crypto/withdrawals", notImplemented)
+	authed("GET /v1/crypto/networks", s.cryptoNetworks)
+	authed("POST /v1/crypto/addresses", s.cryptoAddress)
+	authed("POST /v1/crypto/withdrawals/preview", s.cryptoPreview)
+	authed("POST /v1/crypto/withdrawals", s.cryptoWithdraw)
 
 	// M5 — social
 	authed("POST /v1/transfers", s.createTransfer)

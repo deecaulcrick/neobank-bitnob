@@ -33,28 +33,6 @@ func Every(ctx context.Context, d time.Duration, name string, log *slog.Logger, 
 	}
 }
 
-// Sweep catches missed webhooks: anything in a non-final state older than its
-// expected window is polled from Bitnob and pushed through the same posting
-// path as the webhook would have used.
-func (j *Jobs) Sweep(ctx context.Context) error {
-	var payouts, trades int
-	err := j.Pool.QueryRow(ctx,
-		`select
-		   (select count(*) from payouts
-		     where status in ('initialized', 'processing') and updated_at < now() - interval '20 minutes'),
-		   (select count(*) from trades
-		     where status = 'pending' and created_at < now() - interval '5 minutes')`,
-	).Scan(&payouts, &trades)
-	if err != nil {
-		return err
-	}
-	if payouts+trades > 0 {
-		// TODO(M2/M3): poll bitnob.GetPayout / trade status for each and apply.
-		j.Log.Warn("stale in-flight records need sweeping", "payouts", payouts, "trades", trades)
-	}
-	return nil
-}
-
 // Reconcile checks the ledger's own invariants. Differences are reported for
 // ops, never auto-corrected.
 func (j *Jobs) Reconcile(ctx context.Context) error {

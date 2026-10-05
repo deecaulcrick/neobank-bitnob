@@ -683,6 +683,12 @@ func (s *Service) Sweep(ctx context.Context) error {
 		default:
 			// Still QUOTE or INITIATED at Bitnob: finalize never landed. Once
 			// the quote has lapsed nothing can move, so give the money back.
+			// Any status we don't recognise is left alone rather than guessed at.
+			known := strings.EqualFold(bp.Status, "QUOTE") || strings.EqualFold(bp.Status, "INITIATED")
+			if !known {
+				s.Log.Error("NEEDS REVIEW: payout in unrecognised Bitnob status", "payout", o.id, "status", bp.Status)
+				continue
+			}
 			if !bp.ExpiresAt.IsZero() && time.Now().After(bp.ExpiresAt.Add(time.Minute)) {
 				if err := s.finish(ctx, o.id, "expired", "The payout was not completed in time.", raw); err != nil {
 					s.Log.Error("sweep: expire payout", "payout", o.id, "err", err)

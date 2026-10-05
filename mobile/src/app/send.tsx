@@ -74,7 +74,13 @@ export default function Send() {
             variant="secondary"
             onPress={() => router.push({ pathname: '/payout-setup', params: { asset, amount } })}
           />
-          <Button label="Send crypto" variant="secondary" onPress={() => router.push('/receive')} />
+          {asset !== 'NGN' && (
+            <Button
+              label={`To a ${asset} address`}
+              variant="secondary"
+              onPress={() => router.push({ pathname: '/send-crypto', params: { asset, amount } })}
+            />
+          )}
         </View>
       </KeyboardAvoidingView>
     </Screen>

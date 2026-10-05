@@ -79,8 +79,9 @@ is signed: credit > 0, debit < 0, and each entry sums to zero per asset
 | Swaps: `POST /v1/swaps/quotes`, `POST /v1/swaps`; funds held while the order is out, settled or released after | done, verified with real sandbox trades |
 | Prices: `GET /v1/prices` (indicative, display only) and per-user display currency | done |
 | Payouts: countries, per-rail recipient forms, account lookup, quote, send, status, saved recipients; funds held until the rail confirms | done, verified with sandbox payouts to a Nigerian bank and Ghanaian mobile money |
-| Crypto in/out, activity | routes return 501; screens are placeholders |
-| App: phone + OTP, onboarding (name, email, date of birth, BVN, tag), Home, Add money, Swap review, Send by tag, Send to bank or mobile money, Profile | done |
+| Crypto: networks, per-user deposit address per network, deposits by webhook and sweep, withdrawals with fee preview | done; payload shapes taken from real sandbox webhooks, flows tested against a mock |
+| Activity | routes return 501; screen is a placeholder |
+| App: phone + OTP, onboarding (name, email, date of birth, BVN, tag), Home, Add money, Swap review, Send by tag, Send to bank or mobile money, Receive and send crypto, Profile | done |
 
 Notes from the sandbox:
 
@@ -105,10 +106,18 @@ Notes from the sandbox:
   source asset and posted to `revenue:fees:{asset}` on success.
 - Webhook signatures are hex HMAC-SHA512 of the raw body in
   `x-bitnob-signature`; real `payouts.*` deliveries verify with this.
+- Crypto: one Bitnob address per user per network takes every asset on that
+  network. The sandbox offers no Tron and fails to mint Bitcoin addresses;
+  Stellar is skipped because it shares one address and separates users by memo.
+- Withdrawals have no fee-estimate or status endpoint. Bitnob adds its own fee
+  on top (1 USDC on our one sandbox withdrawal) and reports the outcome only by
+  `transfer.success` / `transfer.failed`. We charge a flat placeholder fee per
+  network (`feeFor` in `internal/crypto`) and book the difference as revenue.
+- A repeated withdrawal reference is refused with 409, not answered with the
+  original as the docs say.
 - Bitnob cannot deliver webhooks to localhost, so locally deposits arrive via
   the worker's poll (or instantly via the simulate-deposit button in the app).
 
 Bitnob endpoint paths marked `UNVERIFIED` in
 [backend/internal/bitnob/endpoints.go](backend/internal/bitnob/endpoints.go)
-come from the brief and must be checked against the API reference (only the
-M4 crypto calls remain).
+came from the brief; none remain.

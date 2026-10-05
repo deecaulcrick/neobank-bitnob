@@ -3,16 +3,13 @@ package bitnob
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"time"
 )
 
-// Responses are kept as raw JSON until each milestone pins the real shapes
-// against the sandbox; callers store them in the `raw` columns either way.
-//
-// Paths marked UNVERIFIED come from the spec's brief, not the API reference.
-// Check each against https://bitnob.dev/api-reference/ before building on it.
+// Every path and shape in this file was confirmed against the sandbox.
 
 // WhoAmI validates credentials (M0 health check).
 func (c *Client) WhoAmI(ctx context.Context) (json.RawMessage, error) {
@@ -320,14 +317,110 @@ func (c *Client) GetPayout(ctx context.Context, id string) (Payout, json.RawMess
 }
 
 // --- M4: crypto in/out -----------------------------------------------------
+// Shapes confirmed against the sandbox.
 
-// GenerateAddress and CreateWithdrawal: UNVERIFIED paths.
-func (c *Client) GenerateAddress(ctx context.Context, in any) (json.RawMessage, error) {
-	var out json.RawMessage
-	return out, c.do(ctx, http.MethodPost, "/api/addresses/generate", in, &out)
+// Chain is a network and the assets that move on it.
+type Chain struct {
+	Chain       string `json:"chain"`
+	NativeToken struct {
+		Symbol string `json:"symbol"`
+	} `json:"native_token"`
+	Stablecoins []struct {
+		Symbol string `json:"symbol"`
+	} `json:"stablecoins"`
 }
 
-func (c *Client) CreateWithdrawal(ctx context.Context, in any) (json.RawMessage, error) {
-	var out json.RawMessage
-	return out, c.do(ctx, http.MethodPost, "/api/withdrawals", in, &out)
+// SupportedChains is the live network list. The sandbox offers a subset of
+// production (no Tron, for one).
+func (c *Client) SupportedChains(ctx context.Context) ([]Chain, error) {
+	var env envelope[struct {
+		Chains []Chain `json:"chains"`
+	}]
+	err := c.do(ctx, http.MethodGet, "/api/stablecoins/supported-chains", nil, &env)
+	return env.Data.Chains, err
+}
+
+type Address struct {
+	ID      string `json:"id"`
+	Chain   string `json:"chain"`
+	Address string `json:"address"`
+}
+
+// GenerateAddress mints a deposit address on chain. One address receives
+// every supported asset on that chain.
+func (c *Client) GenerateAddress(ctx context.Context, chain, label, reference string) (Address, error) {
+	var env envelope[Address]
+	err := c.do(ctx, http.MethodPost, "/api/addresses", map[string]string{
+		"chain": chain, "label": label, "reference": reference,
+	}, &env)
+	return env.Data, err
+}
+
+// ValidateAddress reports whether address is well-formed for chain.
+func (c *Client) ValidateAddress(ctx context.Context, chain, address string) (bool, error) {
+	var env envelope[struct {
+		Valid bool `json:"valid"`
+	}]
+	err := c.do(ctx, http.MethodPost, "/api/addresses/validate", map[string]string{
+		"chain": chain, "address": address,
+	}, &env)
+	return env.Data.Valid, err
+}
+
+// WithdrawalRequest sends crypto to an external address. Amount is an integer
+// string in the asset's smallest unit. Bitnob charges its fee on top.
+type WithdrawalRequest struct {
+	ToAddress string `json:"to_address"`
+	Amount    string `json:"amount"`
+	Currency  string `json:"currency"`
+	Chain     string `json:"chain"`
+	Reference string `json:"reference"`
+}
+
+type Withdrawal struct {
+	TransactionID string `json:"transaction_id"`
+	Status        string `json:"status"` // pending | completed | failed
+}
+
+// CreateWithdrawal queues a withdrawal. Repeating a reference does not return
+// the original: it fails with 409 DUPLICATE_KEY_ERROR (see IsDuplicate), and
+// there is no endpoint to fetch a withdrawal, so the outcome arrives by
+// webhook or through Transactions.
+func (c *Client) CreateWithdrawal(ctx context.Context, in WithdrawalRequest) (Withdrawal, json.RawMessage, error) {
+	raw, err := c.Raw(ctx, http.MethodPost, "/api/withdrawals", in)
+	if err != nil {
+		return Withdrawal{}, nil, err
+	}
+	var env envelope[Withdrawal]
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return Withdrawal{}, nil, err
+	}
+	return env.Data, raw, nil
+}
+
+// Transaction is one movement on our Bitnob balances. Amount and Fee are
+// integer strings in the currency's smallest unit; Amount is negative for
+// money out.
+type Transaction struct {
+	TransactionID string `json:"transaction_id"`
+	Currency      string `json:"currency"`
+	Type          string `json:"type"`  // DEPOSIT_CONFIRMED, WITHDRAWAL_INITIATED, PAYOUT, ...
+	State         string `json:"state"` // SETTLED, ...
+	Amount        string `json:"amount"`
+	Fee           string `json:"fee"`
+	Reference     string `json:"reference"`
+	Metadata      struct {
+		Address string `json:"address"`
+		Chain   string `json:"chain"`
+		TxHash  string `json:"tx_hash"`
+	} `json:"metadata"`
+}
+
+// Transactions lists the most recent movements, newest first.
+func (c *Client) Transactions(ctx context.Context, limit int) ([]Transaction, error) {
+	var env envelope[struct {
+		Transactions []Transaction `json:"transactions"`
+	}]
+	err := c.do(ctx, http.MethodGet, fmt.Sprintf("/api/transactions?limit=%d", limit), nil, &env)
+	return env.Data.Transactions, err
 }

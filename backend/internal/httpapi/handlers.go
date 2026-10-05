@@ -13,6 +13,7 @@ import (
 
 	"github.com/deecaulcrick/neobank/backend/internal/accounts"
 	"github.com/deecaulcrick/neobank/backend/internal/auth"
+	"github.com/deecaulcrick/neobank/backend/internal/crypto"
 	"github.com/deecaulcrick/neobank/backend/internal/ledger"
 	"github.com/deecaulcrick/neobank/backend/internal/money"
 	"github.com/deecaulcrick/neobank/backend/internal/payouts"
@@ -505,6 +506,117 @@ func (s *Server) payoutError(w http.ResponseWriter, r *http.Request, err error) 
 		writeError(w, http.StatusNotFound, "We couldn't find that payout.")
 	case errors.Is(err, payouts.ErrUnavailable):
 		writeError(w, http.StatusServiceUnavailable, "Sending abroad isn't available right now. Try again later.")
+	default:
+		s.fail(w, r, err)
+	}
+}
+
+func (s *Server) cryptoNetworks(w http.ResponseWriter, r *http.Request) {
+	asset, err := money.ParseAsset(r.URL.Query().Get("asset"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	networks, err := s.Crypto.Networks(r.Context(), asset)
+	if err != nil {
+		s.cryptoError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"networks": networks})
+}
+
+// cryptoAddress returns the user's deposit address on a network, creating it
+// on first use.
+func (s *Server) cryptoAddress(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	var in struct {
+		Asset   string `json:"asset"`
+		Network string `json:"network"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	asset, err := money.ParseAsset(in.Asset)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	address, err := s.Crypto.Address(r.Context(), u.ID, asset, in.Network)
+	if err != nil {
+		s.cryptoError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"asset": string(asset), "network": in.Network, "address": address})
+}
+
+type withdrawRequest struct {
+	Asset          string `json:"asset"`
+	Network        string `json:"network"`
+	Address        string `json:"address"`
+	Amount         string `json:"amount"` // decimal string in major units
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+func (s *Server) withdrawInput(w http.ResponseWriter, r *http.Request) (crypto.WithdrawInput, bool) {
+	var in withdrawRequest
+	if !readJSON(w, r, &in) {
+		return crypto.WithdrawInput{}, false
+	}
+	asset, err := money.ParseAsset(in.Asset)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return crypto.WithdrawInput{}, false
+	}
+	amount, err := money.Parse(asset, in.Amount)
+	if err != nil || amount == 0 {
+		writeError(w, http.StatusBadRequest, "invalid amount")
+		return crypto.WithdrawInput{}, false
+	}
+	return crypto.WithdrawInput{
+		Asset: asset, Network: in.Network, Address: in.Address, Amount: amount, IdempotencyKey: in.IdempotencyKey,
+	}, true
+}
+
+// cryptoPreview prices a withdrawal for the confirm screen. Nothing moves.
+func (s *Server) cryptoPreview(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	in, ok := s.withdrawInput(w, r)
+	if !ok {
+		return
+	}
+	p, err := s.Crypto.Preview(r.Context(), u.ID, in)
+	if err != nil {
+		s.cryptoError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+// cryptoWithdraw sends crypto to an external address. The status comes back
+// "pending" until the network confirms.
+func (s *Server) cryptoWithdraw(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	in, ok := s.withdrawInput(w, r)
+	if !ok {
+		return
+	}
+	t, err := s.Crypto.Withdraw(r.Context(), u.ID, in)
+	if err != nil {
+		s.cryptoError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+func (s *Server) cryptoError(w http.ResponseWriter, r *http.Request, err error) {
+	var invalid *crypto.ValidationError
+	switch {
+	case errors.As(err, &invalid):
+		writeError(w, http.StatusUnprocessableEntity, invalid.Message)
+	case errors.Is(err, ledger.ErrInsufficientFunds):
+		writeError(w, http.StatusUnprocessableEntity, "You don't have enough to send this, including the fee.")
+	case errors.Is(err, crypto.ErrUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "That network isn't available right now. Try another or come back later.")
 	default:
 		s.fail(w, r, err)
 	}

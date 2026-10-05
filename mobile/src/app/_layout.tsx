@@ -69,6 +69,7 @@ function RootStack() {
         <Stack.Screen name="payout-setup" options={sheet} />
         <Stack.Screen name="payout-review" options={sheet} />
         <Stack.Screen name="receive" options={sheet} />
+        <Stack.Screen name="send-crypto" options={sheet} />
         <Stack.Screen name="transaction/[id]" options={{ headerShown: true, title: 'Transaction' }} />
       </Stack.Protected>
     </Stack>

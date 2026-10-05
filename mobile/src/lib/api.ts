@@ -136,6 +136,22 @@ export type Payout = {
   beneficiary_name: string;
 };
 
+export type CryptoNetwork = { network: string; label: string; fee: number; min_withdrawal: number };
+
+export type WithdrawalPreview = {
+  asset: Asset;
+  network: string;
+  address: string;
+  amount: number;
+  fee: number;
+  total: number;
+  enough_funds: boolean;
+};
+
+export type CryptoTransfer = { id: string; status: 'pending' | 'success' | 'failed'; asset: Asset; amount: number; fee: number };
+
+type WithdrawalInput = { asset: Asset; network: string; address: string; amount: string };
+
 export type Balance = { asset: Asset; available: number; pending: number; decimals: number };
 
 export const api = {
@@ -162,6 +178,12 @@ export const api = {
     request<PayoutQuote>('POST', '/v1/payouts/quotes', input),
   sendPayout: (input: { quote_id: string; beneficiary: PayoutBeneficiary; payment_reason: string }) =>
     request<Payout>('POST', '/v1/payouts', input),
+  cryptoNetworks: (asset: Asset) => request<{ networks: CryptoNetwork[] }>('GET', `/v1/crypto/networks?asset=${asset}`),
+  cryptoAddress: (asset: Asset, network: string) =>
+    request<{ address: string }>('POST', '/v1/crypto/addresses', { asset, network }),
+  cryptoPreview: (input: WithdrawalInput) => request<WithdrawalPreview>('POST', '/v1/crypto/withdrawals/preview', input),
+  cryptoWithdraw: (input: WithdrawalInput & { idempotency_key: string }) =>
+    request<CryptoTransfer>('POST', '/v1/crypto/withdrawals', input),
   transfer: (input: { to_tag: string; asset: Asset; amount: string; idempotency_key: string }) =>
     request<{ entry_id: string; status: string }>('POST', '/v1/transfers', input),
   // Development only: pays NGN 1,000 in through the Bitnob sandbox.

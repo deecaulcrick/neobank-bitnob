@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/deecaulcrick/neobank/backend/internal/accounts"
+	"github.com/deecaulcrick/neobank/backend/internal/crypto"
 	"github.com/deecaulcrick/neobank/backend/internal/payouts"
 	"github.com/deecaulcrick/neobank/backend/internal/swaps"
 )
@@ -54,13 +55,18 @@ func NewProcessor(pool *pgxpool.Pool, log *slog.Logger) *Processor {
 	p.Handle("payouts.withdrawal.success", payout)
 	p.Handle("payouts.withdrawal.expired", payout)
 	// M4
-	p.Handle("transfer.success", notImplemented)
+	p.Handle("deposit.success", onchain)
+	p.Handle("transfer.success", onchain)
+	p.Handle("transfer.failed", onchain)
 	return p
 }
 
 func (p *Processor) Handle(event string, h Handler) { p.handlers[event] = h }
 
-func notImplemented(context.Context, pgx.Tx, Event) error { return ErrNotImplemented }
+// onchain credits a crypto deposit, or settles or releases a withdrawal.
+func onchain(ctx context.Context, tx pgx.Tx, ev Event) error {
+	return crypto.ApplyWebhook(ctx, tx, ev.Event, ev.Payload)
+}
 
 // payout advances, settles or releases a payout by event name.
 func payout(ctx context.Context, tx pgx.Tx, ev Event) error {

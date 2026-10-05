@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -51,6 +52,13 @@ type APIError struct {
 
 func (e *APIError) Error() string {
 	return fmt.Sprintf("bitnob: http %d: %s", e.Status, e.Body)
+}
+
+// IsDuplicate reports whether err is Bitnob refusing a reference it has
+// already seen.
+func IsDuplicate(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.Status == http.StatusConflict
 }
 
 // Detail is Bitnob's human-readable explanation, when the body carries one.
