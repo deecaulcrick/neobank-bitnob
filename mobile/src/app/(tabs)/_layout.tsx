@@ -1,20 +1,14 @@
 import { Tabs } from 'expo-router';
 
-import { colors } from '../../theme';
+import { TabBar } from '../../components/TabBar';
 
+// Three tabs: balance, the keypad, history. Profile sits behind the avatar.
 export default function TabsLayout() {
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarStyle: { backgroundColor: colors.bg, borderTopColor: colors.border },
-        tabBarActiveTintColor: colors.accent,
-        tabBarInactiveTintColor: colors.muted,
-      }}>
+    <Tabs tabBar={(props) => <TabBar {...props} />} screenOptions={{ headerShown: false }}>
       <Tabs.Screen name="index" options={{ title: 'Home' }} />
-      <Tabs.Screen name="assets" options={{ title: 'Assets' }} />
+      <Tabs.Screen name="pay" options={{ title: 'Pay' }} />
       <Tabs.Screen name="activity" options={{ title: 'Activity' }} />
-      <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
     </Tabs>
   );
 }

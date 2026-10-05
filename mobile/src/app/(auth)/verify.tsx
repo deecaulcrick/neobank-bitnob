@@ -1,10 +1,10 @@
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Text, TextInput, View } from 'react-native';
 
-import { Button, Screen, styles } from '../../components/ui';
+import { Button, IconButton, Screen, styles } from '../../components/ui';
 import { supabase } from '../../lib/supabase';
-import { space } from '../../theme';
+import { colors, space } from '../../theme';
 
 export default function Verify() {
   const { phone } = useLocalSearchParams<{ phone: string }>();
@@ -22,23 +22,30 @@ export default function Verify() {
   }
 
   return (
-    <Screen style={{ justifyContent: 'space-between' }}>
-      <View style={{ gap: space.md, marginTop: space.xl }}>
-        <Text style={styles.title}>Enter the code</Text>
-        <Text style={styles.muted}>Sent to {phone}</Text>
-        <TextInput
-          style={[styles.input, { letterSpacing: 8 }]}
-          value={code}
-          onChangeText={setCode}
-          keyboardType="number-pad"
-          autoComplete="sms-otp"
-          textContentType="oneTimeCode"
-          maxLength={6}
-          autoFocus
-        />
-        {!!error && <Text style={styles.error}>{error}</Text>}
-      </View>
-      <Button label="Verify" onPress={verify} loading={loading} disabled={code.length < 6} />
+    <Screen>
+      <KeyboardAvoidingView
+        style={{ flex: 1, justifyContent: 'space-between' }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={{ gap: space.sm }}>
+          <IconButton glyph="←" label="Back" onPress={() => router.back()} />
+          <Text style={[styles.heading, { marginTop: space.lg }]}>Enter the code</Text>
+          <Text style={styles.muted}>Sent to {phone}</Text>
+          <TextInput
+            style={[styles.input, { fontSize: 28, letterSpacing: 10, marginTop: space.md }]}
+            value={code}
+            onChangeText={setCode}
+            keyboardType="number-pad"
+            autoComplete="sms-otp"
+            textContentType="oneTimeCode"
+            maxLength={6}
+            autoFocus
+            selectionColor={colors.ink}
+          />
+          <View style={styles.rule} />
+          {!!error && <Text style={styles.error}>{error}</Text>}
+        </View>
+        <Button label="Verify" onPress={verify} loading={loading} disabled={code.length < 6} />
+      </KeyboardAvoidingView>
     </Screen>
   );
 }

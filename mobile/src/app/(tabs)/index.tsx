@@ -1,38 +1,104 @@
 import { router } from 'expo-router';
-import { Text, View } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import { useState } from 'react';
+import { Pressable, ScrollView, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Button, Screen, styles } from '../../components/ui';
-import { formatMinor } from '../../lib/money';
+import { Avatar } from '../../components/Avatar';
+import { Button, styles } from '../../components/ui';
+import { ASSET_BLURB, formatMinor } from '../../lib/money';
 import { useBalances } from '../../lib/useBalances';
-import { colors, space } from '../../theme';
+import { useMe } from '../../lib/useMe';
+import { colors, radius, space, TAB_BAR_SPACE } from '../../theme';
 
-// Home: one big number and three verbs.
+const HIDDEN = '••••';
+
+// Home: dark chrome up top, then a light sheet with one big number.
 export default function Home() {
+  const insets = useSafeAreaInsets();
   const { balances, error } = useBalances();
+  const me = useMe();
+  const [hidden, setHidden] = useState(false);
+
   const ngn = balances?.find((b) => b.asset === 'NGN');
+  const others = balances?.filter((b) => b.asset !== 'NGN') ?? [];
 
   return (
-    <Screen style={{ justifyContent: 'space-between' }}>
-      <View style={{ alignItems: 'center', marginTop: space.xl * 2, gap: space.sm }}>
-        {/* TODO(M2): total across all assets in the display currency, tap to
-            cycle NGN/USD. Needs prices; until then this is the NGN balance. */}
-        <Text style={styles.muted}>NGN balance</Text>
-        <Text style={{ color: colors.text, fontSize: 56, fontWeight: '700' }} adjustsFontSizeToFit numberOfLines={1}>
-          {ngn ? formatMinor('NGN', ngn.available) : '—'}
-        </Text>
-        {!!error && <Text style={styles.error}>{error}</Text>}
+    <View style={{ flex: 1, backgroundColor: colors.night, paddingTop: insets.top }}>
+      <StatusBar style="light" />
+
+      <View style={[styles.row, { paddingHorizontal: space.md, paddingVertical: space.sm, justifyContent: 'flex-end' }]}>
+        <Avatar tag={me?.tag} />
       </View>
 
-      <View style={{ flexDirection: 'row', gap: space.sm }}>
-        <Button label="Add" variant="secondary" style={{ flex: 1 }} onPress={() => router.push('/add-money')} />
-        <Button
-          label="Swap"
-          variant="secondary"
-          style={{ flex: 1 }}
-          onPress={() => router.push({ pathname: '/keypad', params: { action: 'swap' } })}
-        />
-        <Button label="Send" style={{ flex: 1 }} onPress={() => router.push('/send')} />
+      {/* Identity strip tucked behind the sheet. */}
+      <View
+        style={[
+          styles.row,
+          {
+            marginHorizontal: space.md,
+            marginTop: space.md,
+            padding: space.md,
+            paddingBottom: space.md + radius.sheet,
+            marginBottom: -radius.sheet,
+            backgroundColor: colors.nightRaised,
+            borderTopLeftRadius: radius.lg,
+            borderTopRightRadius: radius.lg,
+          },
+        ]}>
+        <View style={{ backgroundColor: colors.onNightWash, borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 8 }}>
+          <Text style={{ color: colors.white, fontSize: 14, fontWeight: '600' }}>Tier {me?.kyc_tier ?? 0}</Text>
+        </View>
+        <Text style={{ color: colors.white, fontSize: 17, fontWeight: '500', opacity: 0.8 }}>
+          {me?.tag ? `@${me.tag}` : 'No tag yet'}
+        </Text>
       </View>
-    </Screen>
+
+      <ScrollView
+        style={{ flex: 1, backgroundColor: colors.sheet, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet }}
+        contentContainerStyle={{ padding: space.md, paddingTop: space.lg, paddingBottom: TAB_BAR_SPACE + insets.bottom, gap: space.md }}>
+        <View style={{ paddingHorizontal: space.sm }}>
+          <View style={styles.row}>
+            {/* TODO(M2): total across all assets in the display currency, tap
+                to cycle NGN/USD. Needs prices; until then this is naira only. */}
+            <Text style={styles.body}>Naira balance</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={hidden ? 'Show balances' : 'Hide balances'}
+              onPress={() => setHidden((h) => !h)}
+              hitSlop={12}>
+              <Text style={[styles.muted, { fontWeight: '600' }]}>{hidden ? 'Show' : 'Hide'}</Text>
+            </Pressable>
+          </View>
+          <Text style={[styles.amount, { fontSize: 56, marginTop: space.xs }]} adjustsFontSizeToFit numberOfLines={1}>
+            {hidden ? HIDDEN : ngn ? formatMinor('NGN', ngn.available) : '—'}
+          </Text>
+          {!!ngn && ngn.pending > 0 && !hidden && (
+            <Text style={styles.muted}>{formatMinor('NGN', ngn.pending)} sending</Text>
+          )}
+          {!!error && <Text style={styles.error}>{error}</Text>}
+        </View>
+
+        <View style={{ flexDirection: 'row', gap: space.sm, marginTop: space.md }}>
+          <Button label="Add money" variant="secondary" style={{ flex: 1 }} onPress={() => router.push('/add-money')} />
+          <Button label="Send" variant="secondary" style={{ flex: 1 }} onPress={() => router.navigate('/pay')} />
+        </View>
+
+        {others.map((b) => (
+          <View key={b.asset} style={[styles.card, styles.row]}>
+            <View style={{ gap: 2 }}>
+              <Text style={styles.body}>{b.asset}</Text>
+              <Text style={[styles.amount, { fontSize: 32, letterSpacing: -1 }]}>
+                {hidden ? HIDDEN : formatMinor(b.asset, b.available)}
+              </Text>
+              <Text style={styles.muted}>
+                {b.pending > 0 && !hidden ? `${formatMinor(b.asset, b.pending)} sending` : ASSET_BLURB[b.asset]}
+              </Text>
+            </View>
+            <Button label="Swap" variant="primary" style={{ height: 44 }} onPress={() => router.navigate('/pay')} />
+          </View>
+        ))}
+      </ScrollView>
+    </View>
   );
 }

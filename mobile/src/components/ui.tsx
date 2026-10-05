@@ -1,13 +1,21 @@
+import { StatusBar } from 'expo-status-bar';
 import type { ReactNode } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 
 import { colors, radius, space } from '../theme';
 
-export function Screen({ children, style }: { children: ReactNode; style?: ViewStyle }) {
+type Tone = 'light' | 'night' | 'accent';
+
+const TONE_BG: Record<Tone, string> = { light: colors.sheet, night: colors.night, accent: colors.accent };
+
+type ScreenProps = { children: ReactNode; tone?: Tone; style?: ViewStyle; edges?: Edge[] };
+
+export function Screen({ children, tone = 'light', style, edges }: ScreenProps) {
   return (
-    <SafeAreaView style={styles.safe}>
-      <View style={[styles.screen, style]}>{children}</View>
+    <SafeAreaView style={{ flex: 1, backgroundColor: TONE_BG[tone] }} edges={edges}>
+      <StatusBar style={tone === 'night' ? 'light' : 'dark'} />
+      <View style={[{ flex: 1, padding: space.md }, style]}>{children}</View>
     </SafeAreaView>
   );
 }
@@ -15,14 +23,15 @@ export function Screen({ children, style }: { children: ReactNode; style?: ViewS
 type ButtonProps = {
   label: string;
   onPress: () => void;
-  variant?: 'primary' | 'secondary';
+  // primary: black pill. secondary: white pill. wash: tinted pill for the accent screen.
+  variant?: 'primary' | 'secondary' | 'wash';
   disabled?: boolean;
   loading?: boolean;
   style?: ViewStyle;
 };
 
 export function Button({ label, onPress, variant = 'primary', disabled, loading, style }: ButtonProps) {
-  const primary = variant === 'primary';
+  const fg = variant === 'primary' ? colors.white : colors.ink;
   return (
     <Pressable
       accessibilityRole="button"
@@ -30,64 +39,74 @@ export function Button({ label, onPress, variant = 'primary', disabled, loading,
       disabled={disabled || loading}
       style={({ pressed }) => [
         styles.button,
-        primary ? styles.primary : styles.secondary,
-        (disabled || loading) && styles.disabled,
-        pressed && styles.pressed,
+        styles[variant],
+        (disabled || loading) && { opacity: 0.35 },
+        pressed && { opacity: 0.75 },
         style,
       ]}>
-      {loading ? (
-        <ActivityIndicator color={primary ? colors.onAccent : colors.text} />
-      ) : (
-        <Text style={[styles.buttonLabel, { color: primary ? colors.onAccent : colors.text }]}>{label}</Text>
-      )}
+      {loading ? <ActivityIndicator color={fg} /> : <Text style={[styles.buttonLabel, { color: fg }]}>{label}</Text>}
     </Pressable>
   );
 }
 
-// Chips sit above the keypad number: asset and destination, not form fields.
-export function Chip({ label, selected, onPress }: { label: string; selected?: boolean; onPress?: () => void }) {
+type IconButtonProps = { glyph: string; label: string; onPress: () => void; tone?: Tone };
+
+// Round header button. Glyphs are text so no icon font is needed yet.
+export function IconButton({ glyph, label, onPress, tone = 'light' }: IconButtonProps) {
+  const bg = tone === 'night' ? colors.onNightWash : tone === 'accent' ? colors.onAccentWash : colors.card;
   return (
-    <Pressable onPress={onPress} style={[styles.chip, selected && styles.chipSelected]}>
-      <Text style={[styles.chipLabel, selected && { color: colors.onAccent }]}>{label}</Text>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      hitSlop={8}
+      style={({ pressed }) => [styles.iconButton, { backgroundColor: bg }, pressed && { opacity: 0.6 }]}>
+      <Text style={{ fontSize: 18, fontWeight: '700', color: tone === 'night' ? colors.white : colors.ink }}>
+        {glyph}
+      </Text>
+    </Pressable>
+  );
+}
+
+type ChipProps = { label: string; selected?: boolean; onPress?: () => void; tone?: Tone };
+
+export function Chip({ label, selected, onPress, tone = 'light' }: ChipProps) {
+  const bg = selected ? colors.ink : tone === 'accent' ? colors.onAccentWash : colors.card;
+  return (
+    <Pressable onPress={onPress} disabled={!onPress} style={[styles.chip, { backgroundColor: bg }]}>
+      <Text style={[styles.chipLabel, selected && { color: colors.white }]}>{label}</Text>
     </Pressable>
   );
 }
 
 // Stand-in for screens whose milestone hasn't been built yet.
-export function ComingSoon({ title, milestone, children }: { title: string; milestone: string; children?: ReactNode }) {
+export function ComingSoon({ title, milestone }: { title: string; milestone: string }) {
   return (
-    <Screen style={{ justifyContent: 'center', alignItems: 'center', gap: space.sm }}>
-      <Text style={styles.title}>{title}</Text>
+    <Screen style={{ justifyContent: 'center', gap: space.sm }}>
+      <Text style={styles.heading}>{title}</Text>
       <Text style={styles.muted}>Lands in {milestone}</Text>
-      {children}
     </Screen>
   );
 }
 
 export const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
-  screen: { flex: 1, padding: space.md, backgroundColor: colors.bg },
-  title: { color: colors.text, fontSize: 24, fontWeight: '700' },
-  body: { color: colors.text, fontSize: 16 },
-  muted: { color: colors.muted, fontSize: 14 },
-  error: { color: colors.danger, fontSize: 14 },
-  button: { height: 56, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space.lg },
-  primary: { backgroundColor: colors.accent },
-  secondary: { backgroundColor: colors.surface },
-  disabled: { opacity: 0.4 },
-  pressed: { opacity: 0.8 },
+  heading: { color: colors.ink, fontSize: 34, lineHeight: 38, fontWeight: '700', letterSpacing: -0.8 },
+  title: { color: colors.ink, fontSize: 22, fontWeight: '700', letterSpacing: -0.3 },
+  body: { color: colors.ink, fontSize: 17, fontWeight: '500' },
+  muted: { color: colors.inkMuted, fontSize: 15 },
+  error: { color: colors.danger, fontSize: 15 },
+  amount: { color: colors.ink, fontWeight: '800', letterSpacing: -2 },
+  button: { height: 60, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space.lg },
+  primary: { backgroundColor: colors.ink },
+  secondary: { backgroundColor: colors.card },
+  wash: { backgroundColor: colors.onAccentWash },
   buttonLabel: { fontSize: 17, fontWeight: '600' },
-  chip: { paddingHorizontal: space.md, paddingVertical: space.sm, borderRadius: radius.pill, backgroundColor: colors.surface },
-  chipSelected: { backgroundColor: colors.accent },
-  chipLabel: { color: colors.text, fontSize: 14, fontWeight: '600' },
-  input: {
-    height: 56,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    color: colors.text,
-    fontSize: 18,
-    paddingHorizontal: space.md,
-  },
-  card: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: space.md },
+  iconButton: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
+  chip: { paddingHorizontal: space.md, height: 36, justifyContent: 'center', borderRadius: radius.pill },
+  chipLabel: { color: colors.ink, fontSize: 14, fontWeight: '600' },
+  // Borderless, like typing straight onto the sheet.
+  input: { color: colors.ink, fontSize: 22, fontWeight: '500', paddingVertical: space.md },
+  rule: { height: StyleSheet.hairlineWidth, backgroundColor: colors.line },
+  card: { backgroundColor: colors.card, borderRadius: radius.lg, padding: space.lg },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
 });

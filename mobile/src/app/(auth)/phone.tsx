@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Text, TextInput, View } from 'react-native';
 
 import { Button, Screen, styles } from '../../components/ui';
 import { supabase } from '../../lib/supabase';
@@ -23,22 +23,27 @@ export default function Phone() {
   }
 
   return (
-    <Screen style={{ justifyContent: 'space-between' }}>
-      <View style={{ gap: space.md, marginTop: space.xl }}>
-        <Text style={styles.title}>What's your number?</Text>
-        <Text style={styles.muted}>We'll text you a code to sign in or create your account.</Text>
-        <TextInput
-          style={styles.input}
-          value={phone}
-          onChangeText={setPhone}
-          keyboardType="phone-pad"
-          autoComplete="tel"
-          autoFocus
-          placeholderTextColor={colors.muted}
-        />
-        {!!error && <Text style={styles.error}>{error}</Text>}
-      </View>
-      <Button label="Continue" onPress={sendCode} loading={loading} disabled={phone.length < 11} />
+    <Screen>
+      <KeyboardAvoidingView
+        style={{ flex: 1, justifyContent: 'space-between' }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={{ gap: space.sm, marginTop: space.xl }}>
+          <Text style={styles.heading}>Enter your phone number</Text>
+          <Text style={styles.muted}>We'll text you a code to sign in or create your account.</Text>
+          <TextInput
+            style={[styles.input, { fontSize: 28, marginTop: space.md }]}
+            value={phone}
+            onChangeText={setPhone}
+            keyboardType="phone-pad"
+            autoComplete="tel"
+            autoFocus
+            selectionColor={colors.ink}
+          />
+          <View style={styles.rule} />
+          {!!error && <Text style={styles.error}>{error}</Text>}
+        </View>
+        <Button label="Continue" onPress={sendCode} loading={loading} disabled={phone.length < 11} />
+      </KeyboardAvoidingView>
     </Screen>
   );
 }

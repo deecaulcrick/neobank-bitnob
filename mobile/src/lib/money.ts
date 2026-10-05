@@ -11,7 +11,7 @@ export const DECIMALS: Record<Asset, number> = { NGN: 2, USDT: 6, USDC: 6, BTC: 
 // Decimals worth showing; the rest are trimmed when they are zero.
 const DISPLAY_DECIMALS: Record<Asset, number> = { NGN: 2, USDT: 2, USDC: 2, BTC: 8 };
 
-const SYMBOL: Record<Asset, string> = { NGN: '₦', USDT: '$', USDC: '$', BTC: '₿' };
+export const SYMBOL: Record<Asset, string> = { NGN: '₦', USDT: '$', USDC: '$', BTC: '₿' };
 
 export function formatMinor(asset: Asset, minor: number): string {
   const d = DECIMALS[asset];
@@ -33,3 +33,17 @@ export function appendKey(asset: Asset, current: string, key: string): string {
   if (next.replace('.', '').length > 15) return current;
   return next;
 }
+
+// Keypad string with thousands separators, for the big number.
+export function formatInput(asset: Asset, input: string): string {
+  const [whole, frac] = (input || '0').split('.');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return SYMBOL[asset] + grouped + (frac !== undefined ? '.' + frac : '');
+}
+
+export const ASSET_BLURB: Record<Asset, string> = {
+  NGN: 'Spending',
+  USDT: 'Dollar savings',
+  USDC: 'Dollar savings',
+  BTC: 'Long-term holding',
+};
