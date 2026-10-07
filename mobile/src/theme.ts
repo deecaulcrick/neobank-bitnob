@@ -17,7 +17,7 @@ export const colors = {
   positive: '#17784C', // money in
   inWash: '#DDF2E5',
   outWash: '#EDEDE9',
-  swapWash: '#FBF0A1',
+  swapWash: '#edffcf',
   cardWash: '#E4E7FB',
   cardInk: '#3A45B5',
   dangerWash: '#FBE4E1',
