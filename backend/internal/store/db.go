@@ -4,6 +4,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -15,7 +16,12 @@ func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse DATABASE_URL: %w", err)
 	}
-	cfg.MaxConnIdleTime = 5 * time.Minute
+	// A connection that died with the network must not linger: idle ones are
+	// dropped quickly, checked often, and probed by TCP keepalives, so a
+	// request is not handed a socket that will never answer.
+	cfg.MaxConnIdleTime = 30 * time.Second
+	cfg.HealthCheckPeriod = 15 * time.Second
+	cfg.ConnConfig.DialFunc = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 15 * time.Second}).DialContext
 	// Works through Supabase's transaction pooler (port 6543), which cannot
 	// keep named prepared statements across pooled connections.
 	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe

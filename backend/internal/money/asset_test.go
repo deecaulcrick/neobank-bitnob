@@ -37,3 +37,21 @@ func TestParseRejects(t *testing.T) {
 		}
 	}
 }
+
+func TestDisplay(t *testing.T) {
+	cases := map[string]string{
+		Display(NGN, 150_050):        "₦1,500.50",
+		Display(NGN, 5):              "₦0.05",
+		Display(USDT, 3_634_508):     "$3.63 USDT",
+		Display(BTC, 1_691):          "₿0.00001691",
+		Display(BTC, 0):              "₿0.00",
+		Display(NGN, 123_456_789_00): "₦123,456,789.00",
+		DisplayFiat("GHS", 5_000):    "GHS 50.00",
+		DisplayFiat("NGN", 100_000):  "₦1,000.00",
+	}
+	for got, want := range cases {
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	}
+}

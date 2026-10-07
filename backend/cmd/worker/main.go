@@ -12,9 +12,11 @@ import (
 
 	"github.com/deecaulcrick/neobank/backend/internal/accounts"
 	"github.com/deecaulcrick/neobank/backend/internal/bitnob"
+	"github.com/deecaulcrick/neobank/backend/internal/cards"
 	"github.com/deecaulcrick/neobank/backend/internal/config"
 	"github.com/deecaulcrick/neobank/backend/internal/crypto"
 	"github.com/deecaulcrick/neobank/backend/internal/jobs"
+	"github.com/deecaulcrick/neobank/backend/internal/notify"
 	"github.com/deecaulcrick/neobank/backend/internal/payouts"
 	"github.com/deecaulcrick/neobank/backend/internal/store"
 	"github.com/deecaulcrick/neobank/backend/internal/swaps"
@@ -43,8 +45,13 @@ func main() {
 	swap := &swaps.Service{Pool: pool, Bitnob: bn, FeeBps: cfg.SwapFeeBps, Log: log}
 	pay := &payouts.Service{Pool: pool, Bitnob: bn, FeeBps: cfg.PayoutFeeBps, Log: log}
 	chain := &crypto.Service{Pool: pool, Bitnob: bn, Log: log}
+	card := &cards.Service{Pool: pool, Bitnob: bn, HashKey: cfg.KYCHashKey, Log: log, Fees: cards.Fees{
+		CreationFee: cfg.CardCreationFee, CreationCost: cfg.CardCreationCost,
+		FundFee: cfg.CardFundFee, FundCost: cfg.CardFundCost,
+	}}
 	j := &jobs.Jobs{Pool: pool, Bitnob: bn, Log: log}
 	processor := webhooks.NewProcessor(pool, log)
+	pusher := &notify.Sender{Pool: pool, Log: log}
 
 	var wg sync.WaitGroup
 	start := func(fn func()) {
@@ -52,9 +59,11 @@ func main() {
 		go func() { defer wg.Done(); fn() }()
 	}
 	start(func() { processor.Run(ctx) })
+	start(func() { jobs.Every(ctx, 5*time.Second, "push", log, pusher.Deliver) })
 	start(func() { jobs.Every(ctx, 30*time.Second, "sweep-swaps", log, swap.Sweep) })
 	start(func() { jobs.Every(ctx, 30*time.Second, "sweep-payouts", log, pay.Sweep) })
 	start(func() { jobs.Every(ctx, time.Minute, "sweep-crypto", log, chain.Sweep) })
+	start(func() { jobs.Every(ctx, 30*time.Second, "sweep-cards", log, card.Sweep) })
 	// Catches deposits whose webhook never arrived (always the case locally,
 	// where Bitnob can't reach the receiver).
 	start(func() { jobs.Every(ctx, time.Minute, "sync-deposits", log, acct.SyncAllDeposits) })

@@ -7,7 +7,15 @@ import { colors, weight } from '../theme';
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', 'back'];
 
 // Bare numerals straight on the background, no key outlines.
-export function Keypad({ onKey }: { onKey: (key: string) => void }) {
+type KeypadProps = {
+  onKey: (key: string) => void;
+  // PIN entry has no decimal point.
+  decimal?: boolean;
+  // Shorter keys, for screens where the keypad shares space.
+  compact?: boolean;
+};
+
+export function Keypad({ onKey, decimal = true, compact }: KeypadProps) {
   return (
     <View style={styles.grid}>
       {KEYS.map((key) => (
@@ -15,7 +23,8 @@ export function Keypad({ onKey }: { onKey: (key: string) => void }) {
           key={key}
           accessibilityRole="button"
           accessibilityLabel={key === 'back' ? 'Delete' : key === '.' ? 'Decimal point' : key}
-          style={({ pressed }) => [styles.key, pressed && { opacity: 0.35 }]}
+          disabled={key === '.' && !decimal}
+          style={({ pressed }) => [styles.key, compact && { height: 54 }, pressed && { opacity: 0.35 }]}
           onPress={() => {
             Haptics.selectionAsync();
             onKey(key);
@@ -23,7 +32,7 @@ export function Keypad({ onKey }: { onKey: (key: string) => void }) {
           {key === 'back' ? (
             <ChevronLeft size={30} strokeWidth={2.25} color={colors.ink} />
           ) : (
-            <Text style={styles.label}>{key}</Text>
+            <Text style={styles.label}>{key === '.' && !decimal ? '' : key}</Text>
           )}
         </Pressable>
       ))}

@@ -14,6 +14,9 @@ export const KIND_LABEL: Record<ActivityKind, string> = {
   payout: 'Sent out',
   crypto_in: 'Crypto received',
   crypto_out: 'Crypto sent',
+  card_create: 'Card',
+  card_fund: 'Card',
+  card_withdraw: 'Card',
 };
 
 // Honest words for a movement that isn't finished or didn't happen.

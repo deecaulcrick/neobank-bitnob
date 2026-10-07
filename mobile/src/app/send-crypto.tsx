@@ -3,9 +3,11 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Text, TextInput, View } from 'react-native';
 
+import { AmountField } from '../components/AmountField';
 import { Button, Chip, Screen, styles } from '../components/ui';
 import { api, type CryptoNetwork, type WithdrawalPreview } from '../lib/api';
-import { formatInput, formatMinor, type Asset } from '../lib/money';
+import { formatMinor, type Asset } from '../lib/money';
+import { Cancelled, usePin } from '../lib/pin';
 import { refreshBalances } from '../lib/useBalances';
 import { colors, space } from '../theme';
 
@@ -21,7 +23,10 @@ function Row({ label, value }: { label: string; value: string }) {
 // Send crypto to an external address. The fee and the total leaving the
 // balance are shown before anything is confirmed.
 export default function SendCrypto() {
-  const { asset, amount } = useLocalSearchParams<{ asset: Asset; amount: string }>();
+  const params = useLocalSearchParams<{ asset: Asset; amount: string }>();
+  const [asset, setAsset] = useState<Asset>(params.asset);
+  const [amount, setAmount] = useState(params.amount);
+  const { withPin } = usePin();
   const [networks, setNetworks] = useState<CryptoNetwork[] | null>(null);
   const [network, setNetwork] = useState('');
   const [address, setAddress] = useState('');
@@ -33,6 +38,8 @@ export default function SendCrypto() {
   const idempotencyKey = useRef(`${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
   useEffect(() => {
+    setNetworks(null);
+    setNetwork('');
     api
       .cryptoNetworks(asset)
       .then((r) => {
@@ -68,7 +75,12 @@ export default function SendCrypto() {
     setSending(true);
     setError('');
     try {
-      const t = await api.cryptoWithdraw({ asset, network, address: address.trim(), amount, idempotency_key: idempotencyKey.current });
+      const t = await withPin((pin) =>
+        api.cryptoWithdraw(
+          { asset, network, address: address.trim(), amount, idempotency_key: idempotencyKey.current },
+          pin,
+        ),
+      );
       refreshBalances();
       const what = `${formatMinor(t.asset, t.amount)} ${t.asset}`;
       router.replace({
@@ -79,6 +91,7 @@ export default function SendCrypto() {
             : { message: `Sending ${what}. It's done when the network confirms; if it fails, the money goes back to your balance.`, pending: '1' },
       });
     } catch (e) {
+      if (e instanceof Cancelled) return;
       setError(e instanceof Error ? e.message : 'Something went wrong');
       refreshBalances();
       // A refused withdrawal is final for that key; the next try is a new one.
@@ -91,12 +104,24 @@ export default function SendCrypto() {
   const label = networks?.find((n) => n.network === network)?.label ?? network;
 
   return (
-    <Screen sheet={`Send ${formatInput(asset, amount)} ${asset}`}>
+    <Screen sheet="Send crypto">
       <KeyboardAvoidingView
         style={{ flex: 1, justifyContent: 'space-between' }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={40}>
         <View style={{ gap: space.md }}>
+          <View>
+            <Text style={styles.muted}>You send</Text>
+            <AmountField
+              asset={asset}
+              amount={amount}
+              assets={['USDT', 'USDC', 'BTC']}
+              onChange={(a, v) => {
+                setAsset(a);
+                setAmount(v);
+              }}
+            />
+          </View>
           {!!networks && networks.length > 0 && (
             <View style={{ gap: space.sm }}>
               <Text style={styles.muted}>Network</Text>

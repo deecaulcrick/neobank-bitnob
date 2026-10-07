@@ -23,15 +23,25 @@ export function formatMinor(asset: Asset, minor: number): string {
   return `${minor < 0 ? '-' : ''}${SYMBOL[asset]}${whole}${frac ? '.' + frac : ''}`;
 }
 
-// Keypad input rules: digits and one dot, capped at the asset's precision.
-export function appendKey(asset: Asset, current: string, key: string): string {
+// Keypad input rules: digits and one dot, capped at a number of decimals.
+export function appendDigit(decimals: number, current: string, key: string): string {
   if (key === 'back') return current.slice(0, -1);
   if (key === '.') return current.includes('.') ? current : (current || '0') + '.';
   const next = current === '0' ? key : current + key;
   const frac = next.split('.')[1];
-  if (frac && frac.length > DECIMALS[asset]) return current;
+  if (frac && frac.length > decimals) return current;
   if (next.replace('.', '').length > 15) return current;
   return next;
+}
+
+export const appendKey = (asset: Asset, current: string, key: string) => appendDigit(DECIMALS[asset], current, key);
+
+// A typed amount in any payout currency: "GHS 1,250.5".
+export function formatFiatInput(currency: string, input: string): string {
+  const [whole, frac] = (input || '0').split('.');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const prefix = currency === 'NGN' ? '₦' : currency === 'USD' ? '$' : `${currency} `;
+  return prefix + grouped + (frac !== undefined ? '.' + frac : '');
 }
 
 // Keypad string with thousands separators, for the big number.
@@ -111,4 +121,11 @@ export function formatBalance(asset: Asset, minor: number): string {
 export function formatCurrency(currency: string, hundredths: number): string {
   if (currency === 'NGN' || currency === 'USD') return formatFiat(currency, hundredths);
   return `${currency} ${formatFiat('NGN', hundredths).slice(1)}`;
+}
+
+// Minor units as a keypad string, without trailing zeros: 150050 kobo -> "1500.5".
+export function minorToInput(asset: Asset, minor: number): string {
+  const d = DECIMALS[asset];
+  const digits = String(Math.max(0, Math.trunc(minor))).padStart(d + 1, '0');
+  return `${digits.slice(0, -d)}.${digits.slice(-d)}`.replace(/\.?0+$/, '');
 }

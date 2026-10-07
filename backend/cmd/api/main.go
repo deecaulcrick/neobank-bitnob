@@ -11,15 +11,21 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/deecaulcrick/neobank/backend/internal/accounts"
 	"github.com/deecaulcrick/neobank/backend/internal/activity"
 	"github.com/deecaulcrick/neobank/backend/internal/auth"
 	"github.com/deecaulcrick/neobank/backend/internal/bitnob"
+	"github.com/deecaulcrick/neobank/backend/internal/cards"
 	"github.com/deecaulcrick/neobank/backend/internal/config"
 	"github.com/deecaulcrick/neobank/backend/internal/crypto"
 	"github.com/deecaulcrick/neobank/backend/internal/httpapi"
+	"github.com/deecaulcrick/neobank/backend/internal/limits"
+	"github.com/deecaulcrick/neobank/backend/internal/money"
 	"github.com/deecaulcrick/neobank/backend/internal/payouts"
 	"github.com/deecaulcrick/neobank/backend/internal/prices"
+	"github.com/deecaulcrick/neobank/backend/internal/screening"
 	"github.com/deecaulcrick/neobank/backend/internal/store"
 	"github.com/deecaulcrick/neobank/backend/internal/swaps"
 	"github.com/deecaulcrick/neobank/backend/internal/webhooks"
@@ -53,15 +59,39 @@ func run(log *slog.Logger) error {
 	}
 
 	bn := bitnob.New(cfg.BitnobBaseURL, cfg.BitnobClientID, cfg.BitnobClientSecret)
+	rates := &prices.Service{Bitnob: bn, TTL: time.Minute}
+	lim := &limits.Service{Pool: pool, Prices: rates, Cfg: limits.Config{
+		Daily:           cfg.DailyLimitNaira * 100,
+		Single:          cfg.SingleLimitNaira * 100,
+		MaxSends:        int(cfg.MaxSendsPerDay),
+		NewAccountHold:  time.Duration(cfg.NewAccountHoldHours) * time.Hour,
+		NewAccountDaily: cfg.NewAccountDailyNaira * 100,
+	}}
+	// The services call back into limits and screening just before they
+	// reserve a user's funds.
+	check := func(kind limits.Kind) func(context.Context, uuid.UUID, money.Asset, int64) error {
+		return func(ctx context.Context, userID uuid.UUID, asset money.Asset, amount int64) error {
+			return lim.Check(ctx, userID, kind, asset, amount)
+		}
+	}
 	srv := &httpapi.Server{
 		Cfg:      cfg,
 		Pool:     pool,
 		Bitnob:   bn,
 		Accounts: &accounts.Service{Pool: pool, Bitnob: bn, HashKey: cfg.KYCHashKey},
 		Activity: &activity.Service{Pool: pool},
-		Crypto:   &crypto.Service{Pool: pool, Bitnob: bn, Log: log},
-		Payouts:  &payouts.Service{Pool: pool, Bitnob: bn, FeeBps: cfg.PayoutFeeBps, Log: log},
-		Prices:   &prices.Service{Bitnob: bn, TTL: time.Minute},
+		Crypto:   &crypto.Service{Pool: pool, Bitnob: bn, Log: log, Check: check(limits.Crypto)},
+		Limits:   lim,
+		Cards:    &cards.Service{Pool: pool, Bitnob: bn, Fees: cardFees(cfg), HashKey: cfg.KYCHashKey, Log: log},
+		Payouts: &payouts.Service{
+			Pool: pool, Bitnob: bn, FeeBps: cfg.PayoutFeeBps, Log: log,
+			Currencies: cfg.PayoutCurrencies,
+			Check:      check(limits.Payout),
+			Screen: func(ctx context.Context, name string) (string, bool, error) {
+				return screening.Check(ctx, pool, name)
+			},
+		},
+		Prices:   rates,
 		Swaps:    &swaps.Service{Pool: pool, Bitnob: bn, FeeBps: cfg.SwapFeeBps, Log: log},
 		Verifier: verifier,
 		Webhooks: webhooks.NewReceiver(pool, cfg.BitnobWebhookSecret, log),
@@ -88,4 +118,11 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	return nil
+}
+
+func cardFees(cfg config.Config) cards.Fees {
+	return cards.Fees{
+		CreationFee: cfg.CardCreationFee, CreationCost: cfg.CardCreationCost,
+		FundFee: cfg.CardFundFee, FundCost: cfg.CardFundCost,
+	}
 }

@@ -9,13 +9,14 @@ import { Text, View } from 'react-native';
 
 import { Button, Screen, styles } from '../components/ui';
 import { MeProvider, useMeState } from '../lib/me';
+import { PinProvider } from '../lib/pin';
 import { SessionProvider, useSession } from '../lib/session';
 import { supabase } from '../lib/supabase';
 import { colors, space, weight } from '../theme';
 
 function RootStack() {
   const { session, loading } = useSession();
-  const { me, error, refresh } = useMeState();
+  const { me, error, notInvited, refresh } = useMeState();
   // Signed-in users also wait for their profile, which decides where they land.
   const ready = !loading && (!session || !!me || !!error);
 
@@ -24,6 +25,21 @@ function RootStack() {
   }, [ready]);
 
   if (!ready) return null;
+
+  if (session && !me && notInvited) {
+    return (
+      <Screen style={{ justifyContent: 'center', gap: space.md }}>
+        <Text style={styles.heading}>You're on the waitlist</Text>
+        <Text style={styles.muted}>
+          We're letting people in a few at a time. We'll text you when your number is in.
+        </Text>
+        <View style={{ gap: space.sm, marginTop: space.md }}>
+          <Button label="Check again" onPress={refresh} />
+          <Button label="Sign out" variant="secondary" onPress={() => supabase.auth.signOut()} />
+        </View>
+      </Screen>
+    );
+  }
 
   if (session && !me) {
     return (
@@ -38,8 +54,8 @@ function RootStack() {
     );
   }
 
-  // Tier-1 KYC and a tag come before anything else.
-  const onboarded = !!me && me.kyc_tier >= 1 && !!me.tag;
+  // Tier-1 KYC, a tag and a PIN come before anything else.
+  const onboarded = !!me && me.kyc_tier >= 1 && !!me.tag && me.has_pin;
 
   // Sheets draw their own grabber and title (see Screen's `sheet` prop).
   const sheet = { presentation: 'modal' } as const;
@@ -65,7 +81,10 @@ function RootStack() {
         <Stack.Screen name="send" options={sheet} />
         <Stack.Screen name="success" options={{ presentation: 'fullScreenModal', gestureEnabled: false }} />
         <Stack.Screen name="profile" options={sheet} />
-        <Stack.Screen name="swap-review" options={sheet} />
+        <Stack.Screen name="swap" options={sheet} />
+        <Stack.Screen name="card-setup" options={sheet} />
+        <Stack.Screen name="card-move" options={sheet} />
+        <Stack.Screen name="card-details" options={sheet} />
         <Stack.Screen name="payout-setup" options={sheet} />
         <Stack.Screen name="payout-review" options={sheet} />
         <Stack.Screen name="receive" options={sheet} />
@@ -80,7 +99,9 @@ export default function RootLayout() {
   return (
     <SessionProvider>
       <MeProvider>
-        <RootStack />
+        <PinProvider>
+          <RootStack />
+        </PinProvider>
       </MeProvider>
     </SessionProvider>
   );

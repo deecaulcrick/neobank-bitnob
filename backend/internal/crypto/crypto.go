@@ -21,12 +21,15 @@ import (
 	"github.com/deecaulcrick/neobank/backend/internal/bitnob"
 	"github.com/deecaulcrick/neobank/backend/internal/ledger"
 	"github.com/deecaulcrick/neobank/backend/internal/money"
+	"github.com/deecaulcrick/neobank/backend/internal/notify"
 )
 
 type Service struct {
 	Pool   *pgxpool.Pool
 	Bitnob *bitnob.Client
 	Log    *slog.Logger
+	// Check, when set, enforces the user's limits before funds are held.
+	Check func(ctx context.Context, userID uuid.UUID, asset money.Asset, amount int64) error
 
 	mu       sync.Mutex
 	chains   []bitnob.Chain
@@ -248,7 +251,10 @@ func ApplyDeposit(ctx context.Context, tx pgx.Tx, d Deposit) error {
 		 values ($1, 'deposit', $2::text::asset, $3, $4, $5, nullif($6, ''), $7, 'success', $8, $9)
 		 on conflict (bitnob_transaction_id) do nothing`,
 		userID, string(asset), d.Network, d.Address, amount, d.Hash, d.Reference, res.EntryID, raw)
-	return err
+	if err != nil || userID == nil {
+		return err
+	}
+	return notify.Queue(ctx, tx, *userID, "Crypto received", money.Display(asset, amount)+" arrived in your balance.")
 }
 
 type WithdrawInput struct {
@@ -327,8 +333,12 @@ func (s *Service) Withdraw(ctx context.Context, userID uuid.UUID, in WithdrawInp
 	if err != nil {
 		return Transfer{}, err
 	}
-	// TODO: travel-rule data above thresholds, velocity limits and the
-	// new-account hold (spec: "Compliance, risk and limits").
+	if s.Check != nil {
+		if err := s.Check(ctx, userID, p.Asset, p.Total); err != nil {
+			return Transfer{}, err
+		}
+	}
+	// TODO: travel-rule data above thresholds (spec: "Compliance, risk and limits").
 
 	// The id is derived from the user's key, so a retry lands on the same row.
 	t := Transfer{
@@ -483,7 +493,14 @@ func FinishTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, status string, bitno
 		     raw = coalesce(nullif($7::jsonb, 'null'), raw)
 		 where id = $1`,
 		id, status, res.EntryID, bitnobFee, hash, reason, raw)
-	return err
+	if err != nil {
+		return err
+	}
+	if status == "success" {
+		return notify.Queue(ctx, tx, *userID, "Crypto sent", money.Display(asset, amount)+" was confirmed on the network.")
+	}
+	return notify.Queue(ctx, tx, *userID, "Crypto send returned",
+		money.Display(asset, total)+" is back in your balance.")
 }
 
 // event is the body of deposit.success, transfer.success and transfer.failed.

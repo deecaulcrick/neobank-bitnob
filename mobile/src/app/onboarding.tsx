@@ -2,13 +2,15 @@ import { ArrowLeft } from 'lucide-react-native';
 import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View, type TextInputProps } from 'react-native';
 
+import { Keypad } from '../components/Keypad';
 import { Button, IconButton, Screen, styles } from '../components/ui';
+import { PinDots } from '../lib/pin';
 import { api } from '../lib/api';
 import { useMeState } from '../lib/me';
 import { supabase } from '../lib/supabase';
 import { colors, space } from '../theme';
 
-type Step = 'name' | 'email' | 'dob' | 'bvn' | 'tag';
+type Step = 'name' | 'email' | 'dob' | 'bvn' | 'tag' | 'pin' | 'pin2';
 const KYC_STEPS: Step[] = ['name', 'email', 'dob', 'bvn'];
 
 // Typing 01021994 reads as 01/02/1994.
@@ -45,7 +47,9 @@ function Field(props: TextInputProps) {
 // birth and BVN open the NGN account; then the user picks a tag.
 export default function Onboarding() {
   const { me, refresh } = useMeState();
-  const [step, setStep] = useState<Step>(me && me.kyc_tier >= 1 ? 'tag' : 'name');
+  const [step, setStep] = useState<Step>(!me || me.kyc_tier < 1 ? 'name' : !me.tag ? 'tag' : 'pin');
+  const [pin, setPin] = useState('');
+  const [pin2, setPin2] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -65,6 +69,8 @@ export default function Onboarding() {
     dob: isoDob !== null,
     bvn: /^\d{11}$/.test(bvn),
     tag: /^[a-z0-9_]{3,20}$/.test(cleanTag),
+    pin: pin.length === 4,
+    pin2: pin2.length === 4,
   };
 
   async function run(action: () => Promise<unknown>) {
@@ -95,9 +101,30 @@ export default function Onboarding() {
       });
     }
     if (step === 'tag') {
-      // Once the tag is saved the root layout swaps onboarding for the app.
       return run(async () => {
         await api.setTag(cleanTag);
+        setStep('pin');
+        await refresh();
+      });
+    }
+    if (step === 'pin') return setStep('pin2');
+    if (step === 'pin2') {
+      if (pin !== pin2) {
+        setPin('');
+        setPin2('');
+        setStep('pin');
+        return setError("Those didn't match. Try again.");
+      }
+      // Once the PIN is saved the root layout swaps onboarding for the app.
+      return run(async () => {
+        try {
+          await api.setPin(pin);
+        } catch (e) {
+          setPin('');
+          setPin2('');
+          setStep('pin');
+          throw e;
+        }
         await refresh();
       });
     }
@@ -188,11 +215,33 @@ export default function Onboarding() {
               <Field value={tag} onChangeText={setTag} placeholder="@yourname" autoCapitalize="none" maxLength={21} autoFocus />
             </>
           )}
+          {(step === 'pin' || step === 'pin2') && (
+            <View style={{ gap: space.lg, marginTop: space.md }}>
+              <View style={{ gap: space.sm }}>
+                <Text style={styles.heading}>{step === 'pin' ? 'Create a PIN' : 'Enter it again'}</Text>
+                <Text style={styles.muted}>4 digits. You'll use it to confirm every payment, swap and send.</Text>
+              </View>
+              <PinDots length={(step === 'pin' ? pin : pin2).length} />
+            </View>
+          )}
           {!!error && <Text style={styles.error}>{error}</Text>}
         </View>
 
+        {(step === 'pin' || step === 'pin2') && (
+          <Keypad
+            decimal={false}
+            compact
+            onKey={(key) => {
+              if (key === '.') return;
+              const edit = (cur: string) => (key === 'back' ? cur.slice(0, -1) : (cur + key).slice(0, 4));
+              if (step === 'pin') setPin(edit);
+              else setPin2(edit);
+            }}
+          />
+        )}
+
         <Button
-          label={step === 'bvn' ? 'Open my account' : step === 'tag' ? 'Finish' : 'Continue'}
+          label={step === 'bvn' ? 'Open my account' : step === 'pin2' ? 'Finish' : 'Continue'}
           onPress={next}
           loading={loading}
           disabled={!valid[step]}

@@ -47,6 +47,38 @@ export function useHideBalances(): boolean {
   return useSyncExternalStore(subscribe, () => hideBalances);
 }
 
+export const CARD_THEMES = {
+  ink: { bg: '#0B0D0C', fg: '#FFFFFF' },
+  lime: { bg: '#B6F36A', fg: '#0B0D0C' },
+  sky: { bg: '#2F74E0', fg: '#FFFFFF' },
+  rose: { bg: '#D6336C', fg: '#FFFFFF' },
+  sand: { bg: '#E8E2D2', fg: '#0B0D0C' },
+} as const;
+export type CardTheme = keyof typeof CARD_THEMES;
+
+const CARD_KEY = 'prefs.cardTheme';
+let cardTheme: CardTheme = 'ink';
+
+AsyncStorage.getItem(CARD_KEY)
+  .then((stored) => {
+    if (stored && stored in CARD_THEMES) {
+      cardTheme = stored as CardTheme;
+      emit();
+    }
+  })
+  .catch(() => {});
+
+export function setCardTheme(theme: CardTheme) {
+  cardTheme = theme;
+  emit();
+  AsyncStorage.setItem(CARD_KEY, theme).catch(() => {});
+}
+
+// How the card is drawn. Cosmetic, and kept on this device.
+export function useCardTheme(): CardTheme {
+  return useSyncExternalStore(subscribe, () => cardTheme);
+}
+
 export function setSkyMode(mode: SkyMode) {
   sky = mode;
   emit();

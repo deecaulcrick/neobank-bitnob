@@ -19,6 +19,7 @@ import (
 	"github.com/deecaulcrick/neobank/backend/internal/bitnob"
 	"github.com/deecaulcrick/neobank/backend/internal/ledger"
 	"github.com/deecaulcrick/neobank/backend/internal/money"
+	"github.com/deecaulcrick/neobank/backend/internal/notify"
 )
 
 type Service struct {
@@ -69,16 +70,19 @@ type Trade struct {
 	ToAmount   int64       `json:"to_amount"`
 }
 
-// toMinor converts a decimal string in major units to minor units, dropping
-// any precision beyond the asset's smallest unit (never rounding up).
-func toMinor(a money.Asset, decimal string) (int64, error) {
+// toMinor converts a decimal string in major units to minor units. Precision
+// beyond the asset's smallest unit is dropped, or rounded up when roundUp is
+// set (used for what the user pays, so we never under-collect).
+func toMinor(a money.Asset, decimal string, roundUp bool) (int64, error) {
 	r, ok := new(big.Rat).SetString(strings.TrimSpace(decimal))
 	if !ok || r.Sign() < 0 {
 		return 0, fmt.Errorf("swaps: bad amount %q", decimal)
 	}
-	scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(a.Decimals())), nil)
-	r.Mul(r, new(big.Rat).SetInt(scale))
-	minor := new(big.Int).Quo(r.Num(), r.Denom())
+	r.Mul(r, new(big.Rat).SetInt(pow10(a.Decimals())))
+	minor, rem := new(big.Int).QuoRem(r.Num(), r.Denom(), new(big.Int))
+	if roundUp && rem.Sign() != 0 {
+		minor.Add(minor, big.NewInt(1))
+	}
 	if !minor.IsInt64() {
 		return 0, fmt.Errorf("swaps: amount %q overflows", decimal)
 	}
@@ -94,8 +98,10 @@ func plain(a money.Asset, minor int64) string {
 	return s
 }
 
-// CreateQuote locks a rate for sending amount of from and receiving to.
-func (s *Service) CreateQuote(ctx context.Context, userID uuid.UUID, from, to money.Asset, amount int64) (Quote, error) {
+// CreateQuote locks a rate between from and to. amount is either what the
+// user pays (in from) or, when exactGet is set, exactly what they want to
+// receive (in to); the other figure comes from the quote.
+func (s *Service) CreateQuote(ctx context.Context, userID uuid.UUID, from, to money.Asset, amount int64, exactGet bool) (Quote, error) {
 	if from == to {
 		return Quote{}, &ValidationError{"Pick two different currencies."}
 	}
@@ -106,43 +112,57 @@ func (s *Service) CreateQuote(ctx context.Context, userID uuid.UUID, from, to mo
 		return Quote{}, ErrUnavailable
 	}
 
-	bq, raw, err := s.Bitnob.CreateTradingQuote(ctx, bitnob.TradingQuoteRequest{
-		BaseCurrency:  string(from),
-		QuoteCurrency: string(to),
-		Side:          "sell",
-		Quantity:      plain(from, amount),
-	})
+	// Paying a fixed amount is a Bitnob "sell" of from; receiving a fixed
+	// amount is a "buy" of to. To leave the user exactly what they asked for
+	// after our fee, we buy slightly more and keep the difference.
+	req := bitnob.TradingQuoteRequest{BaseCurrency: string(from), QuoteCurrency: string(to), Side: "sell", Quantity: plain(from, amount)}
+	var gross int64
+	if exactGet {
+		gross = (amount*10_000 + (10_000 - s.FeeBps) - 1) / (10_000 - s.FeeBps)
+		req = bitnob.TradingQuoteRequest{BaseCurrency: string(to), QuoteCurrency: string(from), Side: "buy", Quantity: plain(to, gross)}
+	}
+	bq, raw, err := s.Bitnob.CreateTradingQuote(ctx, req)
 	if err != nil {
 		return Quote{}, translateBitnob(err)
 	}
-	if bq.Exchange == nil || !strings.EqualFold(bq.Exchange.ReceiveCurrency, string(to)) {
+	if bq.Exchange == nil || !strings.EqualFold(bq.Exchange.ReceiveCurrency, string(to)) ||
+		!strings.EqualFold(bq.Exchange.SendCurrency, string(from)) {
 		return Quote{}, fmt.Errorf("swaps: quote %s has no usable exchange block", bq.ID)
 	}
-	sent, err := toMinor(from, bq.Exchange.SendQuantity)
+	pays, err := toMinor(from, bq.Exchange.SendQuantity, exactGet)
 	if err != nil {
 		return Quote{}, err
 	}
-	if sent != amount {
-		return Quote{}, fmt.Errorf("swaps: quote %s is for %d, asked for %d", bq.ID, sent, amount)
-	}
-	gross, err := toMinor(to, bq.Exchange.ReceiveQuantity)
+	received, err := toMinor(to, bq.Exchange.ReceiveQuantity, false)
 	if err != nil {
 		return Quote{}, err
 	}
-	fee := gross * s.FeeBps / 10_000
-	net := gross - fee
-	if net <= 0 {
+
+	var fee, net int64
+	if exactGet {
+		if received != gross {
+			return Quote{}, fmt.Errorf("swaps: quote %s buys %d, asked for %d", bq.ID, received, gross)
+		}
+		fee, net = gross-amount, amount
+	} else {
+		if pays != amount {
+			return Quote{}, fmt.Errorf("swaps: quote %s is for %d, asked for %d", bq.ID, pays, amount)
+		}
+		fee = received * s.FeeBps / 10_000
+		net = received - fee
+	}
+	if net <= 0 || pays <= 0 {
 		return Quote{}, &ValidationError{"That amount is too small to swap."}
 	}
 
 	// All-in rate: what the user gets per unit they give.
 	rate := new(big.Rat).SetFrac(
 		new(big.Int).Mul(big.NewInt(net), pow10(from.Decimals())),
-		new(big.Int).Mul(big.NewInt(amount), pow10(to.Decimals())),
+		new(big.Int).Mul(big.NewInt(pays), pow10(to.Decimals())),
 	).FloatString(10)
 
 	q := Quote{
-		FromAsset: from, ToAsset: to, FromAmount: amount,
+		FromAsset: from, ToAsset: to, FromAmount: pays,
 		ToAmount: net, FeeAmount: fee, Rate: rate, ExpiresAt: bq.ExpiresAt,
 	}
 	err = s.Pool.QueryRow(ctx,
@@ -150,7 +170,7 @@ func (s *Service) CreateQuote(ctx context.Context, userID uuid.UUID, from, to mo
 		                     rate, fee_asset, fee_amount, expires_at, raw)
 		 values ($1, 'swap', $2, $3, $4, $5::text, $6, $7, $5::text::asset, $8, $9, $10)
 		 returning id`,
-		userID, bq.ID, string(from), amount, string(to), net, rate, fee, bq.ExpiresAt, raw,
+		userID, bq.ID, string(from), pays, string(to), net, rate, fee, bq.ExpiresAt, raw,
 	).Scan(&q.ID)
 	if err != nil {
 		return Quote{}, err
@@ -163,7 +183,7 @@ func (s *Service) CreateQuote(ctx context.Context, userID uuid.UUID, from, to mo
 	if err != nil {
 		return Quote{}, err
 	}
-	q.EnoughFunds = available >= amount
+	q.EnoughFunds = available >= pays
 	return q, nil
 }
 
@@ -190,11 +210,16 @@ func translateBitnob(err error) error {
 	return err
 }
 
-// storedQuote is the part of Bitnob's quote response needed to place the order.
+// storedQuote is the part of Bitnob's quote response needed to place the
+// order: it must repeat the quote's own pair, side and quantity.
 type storedQuote struct {
 	Data struct {
 		Quote struct {
-			Price string `json:"price"`
+			BaseCurrency  string `json:"base_currency"`
+			QuoteCurrency string `json:"quote_currency"`
+			Side          string `json:"side"`
+			Quantity      string `json:"quantity"`
+			Price         string `json:"price"`
 		} `json:"quote"`
 	} `json:"data"`
 }
@@ -259,12 +284,13 @@ func (s *Service) Execute(ctx context.Context, userID, quoteID uuid.UUID) (Trade
 
 	var stored storedQuote
 	json.Unmarshal(raw, &stored)
+	sq := stored.Data.Quote
 	order, orderRaw, err := s.Bitnob.CreateOrder(ctx, bitnob.CreateOrderRequest{
-		BaseCurrency:  string(t.FromAsset),
-		QuoteCurrency: string(t.ToAsset),
-		Side:          "sell",
-		Quantity:      plain(t.FromAsset, t.FromAmount),
-		Price:         stored.Data.Quote.Price,
+		BaseCurrency:  sq.BaseCurrency,
+		QuoteCurrency: sq.QuoteCurrency,
+		Side:          strings.ToLower(sq.Side),
+		Quantity:      sq.Quantity,
+		Price:         sq.Price,
 		QuoteID:       bitnobQuoteID,
 		Reference:     t.ID.String(),
 	})
@@ -376,7 +402,15 @@ func FinishTx(ctx context.Context, tx pgx.Tx, tradeID uuid.UUID, status, orderID
 		     raw = coalesce(nullif($5::jsonb, 'null'), raw)
 		 where id = $1`,
 		tradeID, status, res.EntryID, orderID, raw)
-	return err
+	if err != nil {
+		return err
+	}
+	if status == "completed" {
+		return notify.Queue(ctx, tx, userID, "Swap complete",
+			fmt.Sprintf("You swapped %s for %s.", money.Display(from, fromAmt), money.Display(to, net)))
+	}
+	return notify.Queue(ctx, tx, userID, "Swap didn't go through",
+		money.Display(from, fromAmt)+" is back in your balance.")
 }
 
 // tradeEvent is lenient about where Bitnob puts the fields: the docs list

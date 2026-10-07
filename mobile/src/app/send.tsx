@@ -2,14 +2,21 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from 'react-native';
 
+import { AmountField } from '../components/AmountField';
 import { Button, Screen, styles } from '../components/ui';
 import { api, type Person } from '../lib/api';
 import { formatInput, type Asset } from '../lib/money';
+import { Cancelled, usePin } from '../lib/pin';
+import { refreshBalances } from '../lib/useBalances';
 import { colors, space } from '../theme';
 
-// "Send ₦1,500 to @tag": the amount comes from the keypad tab.
+// "Send ₦1,500 to @tag": the amount comes from the keypad tab and can be
+// changed here without going back.
 export default function Send() {
-  const { asset, amount } = useLocalSearchParams<{ asset: Asset; amount: string }>();
+  const params = useLocalSearchParams<{ asset: Asset; amount: string }>();
+  const [asset, setAsset] = useState<Asset>(params.asset);
+  const [amount, setAmount] = useState(params.amount);
+  const { withPin } = usePin();
   const [tag, setTag] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -41,9 +48,13 @@ export default function Send() {
     setLoading(true);
     setError('');
     try {
-      await api.transfer({ to_tag: clean, asset, amount, idempotency_key: idempotencyKey.current });
+      await withPin((pin) =>
+        api.transfer({ to_tag: clean, asset, amount, idempotency_key: idempotencyKey.current }, pin),
+      );
+      refreshBalances();
       router.replace({ pathname: '/success', params: { message: `You sent ${pretty} to @${clean}` } });
     } catch (e) {
+      if (e instanceof Cancelled) return;
       setError(e instanceof Error ? e.message : 'Something went wrong');
     } finally {
       setLoading(false);
@@ -57,15 +68,23 @@ export default function Send() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={40}>
         <View>
-          <Text style={styles.heading}>
-            Send {pretty} <Text style={{ color: colors.inkMuted }}>to</Text>
-          </Text>
-          <View style={[styles.row, { marginTop: space.lg, gap: space.md }]}>
+          <Text style={styles.muted}>Send</Text>
+          <AmountField
+            asset={asset}
+            amount={amount}
+            fontSize={40}
+            onChange={(a, v) => {
+              setAsset(a);
+              setAmount(v);
+              setError('');
+            }}
+          />
+          <View style={[styles.row, { marginTop: space.md, gap: space.md }]}>
             <TextInput
               style={[styles.input, { flex: 1 }]}
               value={tag}
               onChangeText={setTag}
-              placeholder="@tag"
+              placeholder="To @tag"
               placeholderTextColor={colors.inkMuted}
               autoCapitalize="none"
               autoCorrect={false}

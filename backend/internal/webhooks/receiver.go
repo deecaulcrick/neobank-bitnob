@@ -17,8 +17,8 @@ import (
 
 const signatureHeader = "x-bitnob-signature"
 
-// envelope covers both shapes Bitnob sends: payouts use event/event_id,
-// virtual accounts use eventType/eventId.
+// envelope covers the shapes Bitnob sends: payouts use event/event_id,
+// virtual accounts eventType/eventId, and cards event/eventId.
 type envelope struct {
 	Event     string `json:"event"`
 	EventID   string `json:"event_id"`
@@ -68,7 +68,10 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var env envelope
 	err = json.Unmarshal(body, &env)
 	if env.Event == "" {
-		env.Event, env.EventID = env.EventType, env.EventIDv2
+		env.Event = env.EventType
+	}
+	if env.EventID == "" {
+		env.EventID = env.EventIDv2
 	}
 	if err != nil || env.Event == "" {
 		http.Error(w, "malformed event", http.StatusBadRequest)

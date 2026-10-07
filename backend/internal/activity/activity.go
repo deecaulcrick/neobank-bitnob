@@ -21,8 +21,10 @@ var ErrNotFound = errors.New("activity: not found")
 // Item is one row in the feed. Amount is signed: positive is money in.
 // Status is done, pending or failed.
 type Item struct {
-	ID     string `json:"id"`   // "<kind>:<uuid>", opaque to the app
-	Kind   string `json:"kind"` // deposit | transfer_in | transfer_out | swap | payout | crypto_in | crypto_out
+	ID string `json:"id"` // "<kind>:<uuid>", opaque to the app
+	// deposit | transfer_in | transfer_out | swap | payout | crypto_in |
+	// crypto_out | card_create | card_fund | card_withdraw
+	Kind   string `json:"kind"`
 	Status string `json:"status"`
 	Asset  string `json:"asset"`
 	Amount int64  `json:"amount"`
@@ -65,7 +67,15 @@ const feed = `
          c.asset::text,
          case c.direction when 'deposit' then c.amount else -(c.amount + c.service_fee) end,
          null, null, c.network, c.created_at
-    from crypto_transfers c where c.user_id = $1`
+    from crypto_transfers c where c.user_id = $1
+  union all
+  select 'card_' || t.kind, t.id,
+         case t.status when 'success' then 'done' when 'failed' then 'failed' else 'pending' end,
+         'USDC', case t.kind when 'withdraw' then t.amount else -(t.amount + t.fee) end,
+         null, null,
+         case t.kind when 'create' then 'New card' when 'fund' then 'To your card' else 'From your card' end,
+         t.created_at
+    from card_transfers t where t.user_id = $1`
 
 type Filter struct {
 	Asset  string    // "" for all
@@ -246,6 +256,32 @@ func (s *Service) Get(ctx context.Context, userID uuid.UUID, itemID string) (Det
 			{"You paid", amount(d.Asset, abs(d.Amount))},
 			{"Fee (included)", amount(d.Asset, fee)},
 			{"Sent by", strings.ToUpper(rail[:1]) + strings.ReplaceAll(rail[1:], "_", " ") + ", " + country},
+		}
+
+	case "card_create", "card_fund", "card_withdraw":
+		var (
+			updated   time.Time
+			amt, fee  int64
+			whyFailed *string
+		)
+		if err := s.Pool.QueryRow(ctx,
+			`select updated_at, amount, fee, failure_reason from card_transfers where id = $1`, id,
+		).Scan(&updated, &amt, &fee, &whyFailed); err != nil {
+			return Detail{}, err
+		}
+		last := "Completed"
+		if d.Status == "failed" {
+			last = "Didn't go through"
+			if kind != "card_withdraw" {
+				last += ". Returned to your balance"
+			}
+			d.Timeline = []Step{{"Started", &created}, {last, &updated}}
+		} else {
+			d.Timeline = []Step{{"Started", &created}, {last, done(&updated)}}
+		}
+		d.Rows = []Row{{"Amount", amount(d.Asset, amt)}}
+		if fee > 0 {
+			d.Rows = append(d.Rows, Row{"Fee", amount(d.Asset, fee)})
 		}
 
 	case "crypto_in", "crypto_out":

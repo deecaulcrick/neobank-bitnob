@@ -92,3 +92,44 @@ func Format(a Asset, minor int64) string {
 	s := fmt.Sprintf("%0*d", d+1, minor)
 	return sign + s[:len(s)-d] + "." + s[len(s)-d:]
 }
+
+var symbols = map[Asset]string{NGN: "₦", USDT: "$", USDC: "$", BTC: "₿"}
+
+// Display renders minor units for people: "₦1,500.00", "$3.63 USDT",
+// "₿0.00001691". Stablecoins are shown to the cent.
+func Display(a Asset, minor int64) string {
+	s := Format(a, minor)
+	whole, frac, _ := strings.Cut(strings.TrimPrefix(s, "-"), ".")
+	switch a {
+	case USDT, USDC:
+		frac = frac[:2]
+	case BTC:
+		frac = strings.TrimRight(frac, "0")
+		if len(frac) < 2 {
+			frac += strings.Repeat("0", 2-len(frac))
+		}
+	}
+	out := symbols[a] + groupThousands(whole) + "." + frac
+	if a == USDT || a == USDC {
+		out += " " + string(a)
+	}
+	if minor < 0 {
+		out = "-" + out
+	}
+	return out
+}
+
+// DisplayFiat renders hundredths of any payout currency: "GHS 50.00".
+func DisplayFiat(currency string, hundredths int64) string {
+	if currency == string(NGN) {
+		return Display(NGN, hundredths)
+	}
+	return fmt.Sprintf("%s %s.%02d", currency, groupThousands(fmt.Sprint(hundredths/100)), hundredths%100)
+}
+
+func groupThousands(digits string) string {
+	for i := len(digits) - 3; i > 0; i -= 3 {
+		digits = digits[:i] + "," + digits[i:]
+	}
+	return digits
+}

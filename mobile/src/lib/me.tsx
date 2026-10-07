@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 
-import { api, type Me } from './api';
+import { api, ApiError, type Me } from './api';
+import { registerForPush } from './push';
 import { useSession } from './session';
 import { clearBalances } from './useBalances';
 
@@ -8,6 +9,8 @@ type MeState = {
   me: Me | null;
   // Set when the profile could not be loaded (API down, no network).
   error: string;
+  // True when the closed beta is on and this number isn't invited.
+  notInvited: boolean;
   refresh: () => Promise<void>;
   // Switches the currency Home totals in; applied at once, saved in the background.
   setDisplayCurrency: (currency: 'NGN' | 'USD') => void;
@@ -16,6 +19,7 @@ type MeState = {
 const MeContext = createContext<MeState>({
   me: null,
   error: '',
+  notInvited: false,
   refresh: async () => {},
   setDisplayCurrency: () => {},
 });
@@ -27,12 +31,17 @@ export function MeProvider({ children }: { children: ReactNode }) {
   const userId = session?.user.id;
   const [me, setMe] = useState<Me | null>(null);
   const [error, setError] = useState('');
+  const [notInvited, setNotInvited] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      setMe(await api.me());
+      const next = await api.me();
+      setMe(next);
       setError('');
+      setNotInvited(false);
+      if (next.kyc_tier >= 1) registerForPush();
     } catch (e) {
+      setNotInvited(e instanceof ApiError && e.code === 'not_invited');
       setError(e instanceof Error ? e.message : 'Could not load your profile');
     }
   }, []);
@@ -40,6 +49,7 @@ export function MeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setMe(null);
     setError('');
+    setNotInvited(false);
     clearBalances();
     if (userId) refresh();
   }, [userId, refresh]);
@@ -49,7 +59,7 @@ export function MeProvider({ children }: { children: ReactNode }) {
     api.setDisplayCurrency(currency).catch(() => {});
   }, []);
 
-  return <MeContext.Provider value={{ me, error, refresh, setDisplayCurrency }}>{children}</MeContext.Provider>;
+  return <MeContext.Provider value={{ me, error, notInvited, refresh, setDisplayCurrency }}>{children}</MeContext.Provider>;
 }
 
 export const useMeState = () => useContext(MeContext);

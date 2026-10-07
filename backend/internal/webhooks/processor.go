@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/deecaulcrick/neobank/backend/internal/accounts"
+	"github.com/deecaulcrick/neobank/backend/internal/cards"
 	"github.com/deecaulcrick/neobank/backend/internal/crypto"
 	"github.com/deecaulcrick/neobank/backend/internal/payouts"
 	"github.com/deecaulcrick/neobank/backend/internal/swaps"
@@ -55,6 +56,16 @@ func NewProcessor(pool *pgxpool.Pool, log *slog.Logger) *Processor {
 	p.Handle("payouts.withdrawal.success", payout)
 	p.Handle("payouts.withdrawal.expired", payout)
 	// M4
+	// Cards
+	for _, name := range []string{
+		"virtualcard.user.kyc.complete", "virtualcard.user.kyc.failed",
+		"virtualcard.created.completed", "virtualcard.created.failed",
+		"virtualcard.topup.completed", "virtualcard.topup.failed",
+		"virtualcard.withdrawal.completed", "virtualcard.withdrawal.failed",
+		"virtualcard.transaction.debit", "virtualcard.transaction.authorization", "virtualcard.transaction.declined",
+	} {
+		p.Handle(name, card)
+	}
 	p.Handle("deposit.success", onchain)
 	p.Handle("transfer.success", onchain)
 	p.Handle("transfer.failed", onchain)
@@ -62,6 +73,12 @@ func NewProcessor(pool *pgxpool.Pool, log *slog.Logger) *Processor {
 }
 
 func (p *Processor) Handle(event string, h Handler) { p.handlers[event] = h }
+
+// card settles card issuing and loading, records KYC results and notifies
+// on purchases.
+func card(ctx context.Context, tx pgx.Tx, ev Event) error {
+	return cards.ApplyWebhook(ctx, tx, ev.Event, ev.Payload)
+}
 
 // onchain credits a crypto deposit, or settles or releases a withdrawal.
 func onchain(ctx context.Context, tx pgx.Tx, ev Event) error {

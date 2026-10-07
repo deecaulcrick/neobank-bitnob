@@ -7,6 +7,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/mail"
@@ -23,6 +24,7 @@ import (
 	"github.com/deecaulcrick/neobank/backend/internal/bitnob"
 	"github.com/deecaulcrick/neobank/backend/internal/ledger"
 	"github.com/deecaulcrick/neobank/backend/internal/money"
+	"github.com/deecaulcrick/neobank/backend/internal/notify"
 )
 
 type Service struct {
@@ -298,7 +300,11 @@ func ApplyDeposit(ctx context.Context, tx pgx.Tx, d Deposit) error {
 		 values ($1, $2, $3, $4, $5, $6)
 		 on conflict (bitnob_transaction_id) do nothing`,
 		userID, accountID, d.AmountKobo, d.LedgerTransactionID, res.EntryID, raw)
-	return err
+	if err != nil || userID == nil {
+		return err
+	}
+	return notify.Queue(ctx, tx, *userID, "Money in",
+		money.Display(money.NGN, d.AmountKobo)+" arrived in your naira balance.")
 }
 
 // SyncDeposits polls Bitnob for one virtual account's transactions and applies
@@ -317,6 +323,8 @@ func (s *Service) SyncDeposits(ctx context.Context, bitnobAccountID string) (int
 		if err != nil {
 			return applied, fmt.Errorf("accounts: deposit %s has amount %q", t.ID, t.Amount)
 		}
+		// Kept on the row: reconciliation matches on Bitnob's reference.
+		polled, _ := json.Marshal(t)
 		var isNew bool
 		err = pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
 			if err := tx.QueryRow(ctx,
@@ -328,6 +336,7 @@ func (s *Service) SyncDeposits(ctx context.Context, bitnobAccountID string) (int
 				LedgerTransactionID: t.LedgerTransactionID,
 				BitnobAccountID:     t.VirtualAccountID,
 				AmountKobo:          kobo,
+				Raw:                 polled,
 			})
 		})
 		if err != nil {

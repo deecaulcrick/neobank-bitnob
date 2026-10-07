@@ -26,7 +26,10 @@ export async function refreshBalances() {
     .then((prices) => set({ ...state, prices }))
     .catch(() => {});
   try {
-    set({ ...state, balances: (await api.balances()).balances, error: '' });
+    // Await first: spreading `state` before the await would put back the
+    // prices as they were when the request started, losing any that arrived since.
+    const { balances } = await api.balances();
+    set({ ...state, balances, error: '' });
   } catch (e) {
     set({ ...state, error: e instanceof Error ? e.message : 'Could not load balances' });
   }

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -15,10 +16,14 @@ import (
 	"github.com/deecaulcrick/neobank/backend/internal/accounts"
 	"github.com/deecaulcrick/neobank/backend/internal/activity"
 	"github.com/deecaulcrick/neobank/backend/internal/auth"
+	"github.com/deecaulcrick/neobank/backend/internal/cards"
 	"github.com/deecaulcrick/neobank/backend/internal/crypto"
 	"github.com/deecaulcrick/neobank/backend/internal/ledger"
+	"github.com/deecaulcrick/neobank/backend/internal/limits"
 	"github.com/deecaulcrick/neobank/backend/internal/money"
+	"github.com/deecaulcrick/neobank/backend/internal/notify"
 	"github.com/deecaulcrick/neobank/backend/internal/payouts"
+	"github.com/deecaulcrick/neobank/backend/internal/pin"
 	"github.com/deecaulcrick/neobank/backend/internal/swaps"
 )
 
@@ -31,25 +36,46 @@ type meResponse struct {
 	LastName        *string   `json:"last_name"`
 	KYCTier         int       `json:"kyc_tier"`
 	DisplayCurrency string    `json:"display_currency"`
+	// HasPIN is false until the user sets a transaction PIN.
+	HasPIN bool `json:"has_pin"`
 }
+
+// errNotInvited: the closed beta is on and this phone isn't on the list.
+var errNotInvited = errors.New("not invited")
 
 // ensureUser creates our users row and ledger accounts the first time a
 // Supabase-authenticated user calls the API.
 func (s *Server) ensureUser(ctx context.Context, u auth.User) (meResponse, error) {
 	var me meResponse
 	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx,
-			`insert into users (id, phone) values ($1, $2) on conflict (id) do nothing`, u.ID, u.Phone)
-		if err != nil {
+		var exists bool
+		if err := tx.QueryRow(ctx, `select exists (select 1 from users where id = $1)`, u.ID).Scan(&exists); err != nil {
 			return err
+		}
+		if !exists {
+			// Closed beta: a new account needs its phone number on the list.
+			// The session's phone has no leading "+".
+			phone := strings.TrimPrefix(u.Phone, "+")
+			tag, err := tx.Exec(ctx,
+				`update beta_invites set claimed_at = coalesce(claimed_at, now()) where phone = $1`, phone)
+			if err != nil {
+				return err
+			}
+			if s.Cfg.BetaInviteOnly && tag.RowsAffected() == 0 {
+				return errNotInvited
+			}
+			if _, err := tx.Exec(ctx,
+				`insert into users (id, phone) values ($1, $2) on conflict (id) do nothing`, u.ID, u.Phone); err != nil {
+				return err
+			}
 		}
 		if err := ledger.EnsureUserAccounts(ctx, tx, u.ID); err != nil {
 			return err
 		}
 		return tx.QueryRow(ctx,
-			`select id, phone, email::text, tag::text, first_name, last_name, kyc_tier, display_currency
+			`select id, phone, email::text, tag::text, first_name, last_name, kyc_tier, display_currency, pin_hash is not null
 			 from users where id = $1`, u.ID,
-		).Scan(&me.ID, &me.Phone, &me.Email, &me.Tag, &me.FirstName, &me.LastName, &me.KYCTier, &me.DisplayCurrency)
+		).Scan(&me.ID, &me.Phone, &me.Email, &me.Tag, &me.FirstName, &me.LastName, &me.KYCTier, &me.DisplayCurrency, &me.HasPIN)
 	})
 	return me, err
 }
@@ -61,11 +87,110 @@ func (s *Server) getMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	me, err := s.ensureUser(r.Context(), u)
+	if errors.Is(err, errNotInvited) {
+		writeProblem(w, http.StatusForbidden, "not_invited", "We're in a closed beta and your number isn't on the list yet.")
+		return
+	}
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, me)
+}
+
+// requirePIN checks the transaction PIN sent in X-Pin. Every handler that
+// moves money calls it first; it writes the response itself on failure.
+func (s *Server) requirePIN(w http.ResponseWriter, r *http.Request, userID uuid.UUID) bool {
+	err := pin.Verify(r.Context(), s.Pool, userID, r.Header.Get("X-Pin"))
+	if err == nil {
+		return true
+	}
+	s.pinError(w, r, err)
+	return false
+}
+
+func (s *Server) pinError(w http.ResponseWriter, r *http.Request, err error) {
+	var (
+		wrong   *pin.WrongError
+		locked  *pin.LockedError
+		invalid *pin.InvalidError
+	)
+	switch {
+	case errors.Is(err, pin.ErrRequired):
+		writeProblem(w, http.StatusUnauthorized, "pin_required", "Enter your PIN to continue.")
+	case errors.Is(err, pin.ErrNotSet):
+		writeProblem(w, http.StatusForbidden, "pin_not_set", "Set a PIN before moving money.")
+	case errors.As(err, &wrong):
+		writeProblem(w, http.StatusUnauthorized, "pin_wrong",
+			fmt.Sprintf("Wrong PIN. %d %s left.", wrong.Left, map[bool]string{true: "try", false: "tries"}[wrong.Left == 1]))
+	case errors.As(err, &locked):
+		mins := int(time.Until(locked.Until).Minutes()) + 1
+		writeProblem(w, http.StatusTooManyRequests, "pin_locked",
+			fmt.Sprintf("Too many wrong PINs. Try again in %d minutes.", mins))
+	case errors.As(err, &invalid):
+		writeError(w, http.StatusUnprocessableEntity, invalid.Message)
+	default:
+		s.fail(w, r, err)
+	}
+}
+
+// setPIN sets the transaction PIN, or changes it given the current one.
+func (s *Server) setPIN(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	var in struct {
+		PIN        string `json:"pin"`
+		CurrentPIN string `json:"current_pin"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	if err := pin.Set(r.Context(), s.Pool, u.ID, in.CurrentPIN, in.PIN); err != nil {
+		s.pinError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"has_pin": true})
+}
+
+// getLimits reports today's usage against the user's limits, in kobo.
+func (s *Server) getLimits(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	usage, err := s.Limits.Usage(r.Context(), u.ID)
+	if err != nil {
+		s.limitError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, usage)
+}
+
+// limitError writes a limits refusal, reporting whether err was one.
+func (s *Server) limitError(w http.ResponseWriter, r *http.Request, err error) bool {
+	var limit *limits.Error
+	if errors.As(err, &limit) {
+		writeProblem(w, http.StatusUnprocessableEntity, "limit", limit.Message)
+		return true
+	}
+	return false
+}
+
+// registerDevice stores the phone's push token.
+func (s *Server) registerDevice(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	var in struct {
+		Token    string `json:"token"`
+		Platform string `json:"platform"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	if in.Token == "" || len(in.Token) > 300 {
+		writeError(w, http.StatusBadRequest, "invalid token")
+		return
+	}
+	if err := notify.RegisterDevice(r.Context(), s.Pool, u.ID, in.Token, in.Platform); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 var tagPattern = regexp.MustCompile(`^[a-z0-9_]{3,20}$`)
@@ -150,9 +275,6 @@ func (s *Server) getBalances(w http.ResponseWriter, r *http.Request) {
 
 // createTransfer is the in-app send: a pure ledger move between two users,
 // with no Bitnob call.
-//
-// TODO(M5): velocity limits, new-account hold and PIN/biometric confirmation
-// (spec: "Fraud and risk controls") before this is exposed to real users.
 func (s *Server) createTransfer(w http.ResponseWriter, r *http.Request) {
 	u, _ := auth.FromContext(r.Context())
 	var in struct {
@@ -179,6 +301,9 @@ func (s *Server) createTransfer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "idempotency_key is required")
 		return
 	}
+	if !s.requirePIN(w, r, u.ID) {
+		return
+	}
 
 	ctx := r.Context()
 	var receiver uuid.UUID
@@ -194,6 +319,12 @@ func (s *Server) createTransfer(w http.ResponseWriter, r *http.Request) {
 	}
 	if receiver == u.ID {
 		writeError(w, http.StatusBadRequest, "you can't send to yourself")
+		return
+	}
+	if err := s.Limits.Check(ctx, u.ID, limits.Transfer, asset, amount); err != nil {
+		if !s.limitError(w, r, err) {
+			s.fail(w, r, err)
+		}
 		return
 	}
 
@@ -216,7 +347,15 @@ func (s *Server) createTransfer(w http.ResponseWriter, r *http.Request) {
 			`insert into p2p_transfers (sender_id, receiver_id, asset, amount, note, entry_id)
 			 values ($1, $2, $3, $4, nullif($5, ''), $6)`,
 			u.ID, receiver, string(asset), amount, in.Note, res.EntryID)
-		return err
+		if err != nil {
+			return err
+		}
+		var from string
+		if err := tx.QueryRow(ctx, `select coalesce('@' || tag::text, 'someone') from users where id = $1`, u.ID).Scan(&from); err != nil {
+			return err
+		}
+		return notify.Queue(ctx, tx, receiver, "You've got money",
+			fmt.Sprintf("%s sent you %s.", from, money.Display(asset, amount)))
 	})
 	switch {
 	case errors.Is(err, ledger.ErrInsufficientFunds):
@@ -271,6 +410,10 @@ func (s *Server) submitKYC(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.ensureUser(r.Context(), u); err != nil {
+		if errors.Is(err, errNotInvited) {
+			writeProblem(w, http.StatusForbidden, "not_invited", "We're in a closed beta and your number isn't on the list yet.")
+			return
+		}
 		s.fail(w, r, err)
 		return
 	}
@@ -323,7 +466,10 @@ func (s *Server) createSwapQuote(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		From   string `json:"from"`
 		To     string `json:"to"`
-		Amount string `json:"amount"` // decimal string in major units of From
+		Amount string `json:"amount"` // decimal string in major units
+		// "pay" (default): amount is what the user gives, in From.
+		// "get": amount is exactly what they want to receive, in To.
+		Side string `json:"side"`
 	}
 	if !readJSON(w, r, &in) {
 		return
@@ -338,12 +484,17 @@ func (s *Server) createSwapQuote(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	amount, err := money.Parse(from, in.Amount)
+	exactGet := in.Side == "get"
+	unit := from
+	if exactGet {
+		unit = to
+	}
+	amount, err := money.Parse(unit, in.Amount)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid amount")
 		return
 	}
-	q, err := s.Swaps.CreateQuote(r.Context(), u.ID, from, to, amount)
+	q, err := s.Swaps.CreateQuote(r.Context(), u.ID, from, to, amount, exactGet)
 	if err != nil {
 		s.swapError(w, r, err)
 		return
@@ -359,6 +510,9 @@ func (s *Server) executeSwap(w http.ResponseWriter, r *http.Request) {
 		QuoteID uuid.UUID `json:"quote_id"`
 	}
 	if !readJSON(w, r, &in) {
+		return
+	}
+	if !s.requirePIN(w, r, u.ID) {
 		return
 	}
 	t, err := s.Swaps.Execute(r.Context(), u.ID, in.QuoteID)
@@ -470,6 +624,9 @@ func (s *Server) sendPayout(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
+	if !s.requirePIN(w, r, u.ID) {
+		return
+	}
 	p, err := s.Payouts.Send(r.Context(), u.ID, in)
 	if err != nil {
 		s.payoutError(w, r, err)
@@ -494,6 +651,9 @@ func (s *Server) getPayout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) payoutError(w http.ResponseWriter, r *http.Request, err error) {
+	if s.limitError(w, r, err) {
+		return
+	}
 	var invalid *payouts.ValidationError
 	switch {
 	case errors.As(err, &invalid):
@@ -602,6 +762,9 @@ func (s *Server) cryptoWithdraw(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !s.requirePIN(w, r, u.ID) {
+		return
+	}
 	t, err := s.Crypto.Withdraw(r.Context(), u.ID, in)
 	if err != nil {
 		s.cryptoError(w, r, err)
@@ -611,6 +774,9 @@ func (s *Server) cryptoWithdraw(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) cryptoError(w http.ResponseWriter, r *http.Request, err error) {
+	if s.limitError(w, r, err) {
+		return
+	}
 	var invalid *crypto.ValidationError
 	switch {
 	case errors.As(err, &invalid):
@@ -673,6 +839,139 @@ func (s *Server) getActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, d)
+}
+
+func (s *Server) getCard(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	view, err := s.Cards.Get(r.Context(), u.ID)
+	if err != nil {
+		s.cardError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+// cardKYC runs the fuller identity check a card needs.
+func (s *Server) cardKYC(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	var in cards.KYCInput
+	if !readJSON(w, r, &in) {
+		return
+	}
+	status, err := s.Cards.SubmitKYC(r.Context(), u.ID, in)
+	if err != nil {
+		s.cardError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"kyc_status": status})
+}
+
+type cardAmount struct {
+	Amount         string `json:"amount"` // dollars, as a decimal string
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+func (s *Server) cardAmount(w http.ResponseWriter, r *http.Request) (cardAmount, int64, bool) {
+	var in cardAmount
+	if !readJSON(w, r, &in) {
+		return in, 0, false
+	}
+	amount, err := money.Parse(money.USDC, in.Amount)
+	if err != nil || amount == 0 {
+		writeError(w, http.StatusBadRequest, "invalid amount")
+		return in, 0, false
+	}
+	return in, amount, true
+}
+
+// createCard issues the user's card, loaded from their USDC balance.
+func (s *Server) createCard(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	in, amount, ok := s.cardAmount(w, r)
+	if !ok || !s.requirePIN(w, r, u.ID) {
+		return
+	}
+	t, err := s.Cards.Create(r.Context(), u.ID, amount, in.IdempotencyKey)
+	if err != nil {
+		s.cardError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+// moveCard loads the card from USDC ("fund") or moves money back ("withdraw").
+func (s *Server) moveCard(kind string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		u, _ := auth.FromContext(r.Context())
+		in, amount, ok := s.cardAmount(w, r)
+		if !ok || !s.requirePIN(w, r, u.ID) {
+			return
+		}
+		t, err := s.Cards.Move(r.Context(), u.ID, kind, amount, in.IdempotencyKey)
+		if err != nil {
+			s.cardError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, t)
+	}
+}
+
+// revealCard returns the full card number and security code. PIN required;
+// the response must not be cached or logged.
+func (s *Server) revealCard(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	if !s.requirePIN(w, r, u.ID) {
+		return
+	}
+	secrets, err := s.Cards.Reveal(r.Context(), u.ID)
+	if err != nil {
+		s.cardError(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, secrets)
+}
+
+func (s *Server) lockCard(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	var in struct {
+		Locked bool `json:"locked"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	status, err := s.Cards.SetLocked(r.Context(), u.ID, in.Locked)
+	if err != nil {
+		s.cardError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": status})
+}
+
+func (s *Server) cardTransactions(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	txns, err := s.Cards.Transactions(r.Context(), u.ID)
+	if err != nil {
+		s.cardError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"transactions": txns})
+}
+
+func (s *Server) cardError(w http.ResponseWriter, r *http.Request, err error) {
+	var invalid *cards.ValidationError
+	switch {
+	case errors.As(err, &invalid):
+		writeError(w, http.StatusUnprocessableEntity, invalid.Message)
+	case errors.Is(err, ledger.ErrInsufficientFunds):
+		writeError(w, http.StatusUnprocessableEntity, "You don't have enough USDC for that, including the fee.")
+	case errors.Is(err, cards.ErrNoCard):
+		writeError(w, http.StatusNotFound, "You don't have a card yet.")
+	case errors.Is(err, cards.ErrUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "Cards aren't available right now. Try again later.")
+	default:
+		s.fail(w, r, err)
+	}
 }
 
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {

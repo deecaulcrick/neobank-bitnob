@@ -5,7 +5,7 @@ import { Text, View } from 'react-native';
 import { Avatar } from '../../components/Avatar';
 import { Keypad } from '../../components/Keypad';
 import { Button, Chip, Screen, styles } from '../../components/ui';
-import { appendKey, ASSETS, DECIMALS, formatBalance, formatInput, type Asset } from '../../lib/money';
+import { appendKey, ASSETS, formatBalance, formatInput, minorToInput, type Asset } from '../../lib/money';
 import { useBalances } from '../../lib/useBalances';
 import { useMe } from '../../lib/useMe';
 import { space, TAB_BAR_SPACE } from '../../theme';
@@ -18,13 +18,7 @@ export default function Pay() {
   const valid = Number(amount) > 0;
   const available = useBalances().balances?.find((b) => b.asset === asset)?.available;
 
-  // The whole balance as a keypad string, without trailing zeros.
-  function fillMax() {
-    if (!available) return;
-    const d = DECIMALS[asset];
-    const digits = String(available).padStart(d + 1, '0');
-    setAmount(`${digits.slice(0, -d)}.${digits.slice(-d)}`.replace(/\.?0+$/, ''));
-  }
+  const fillMax = () => available && setAmount(minorToInput(asset, available));
 
   return (
     <Screen tone="accent" edges={['top']} style={{ paddingBottom: TAB_BAR_SPACE }}>
@@ -67,8 +61,7 @@ export default function Pay() {
             label="Swap"
             variant="wash"
             style={{ flex: 1 }}
-            disabled={!valid}
-            onPress={() => router.push({ pathname: '/swap-review', params: { from: asset, amount } })}
+            onPress={() => router.push({ pathname: '/swap', params: { from: asset, amount } })}
           />
         </View>
         <Button

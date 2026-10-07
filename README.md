@@ -76,14 +76,21 @@ is signed: credit > 0, debit < 0, and each entry sums to zero per asset
 | `GET /v1/me`, `PUT /v1/me/tag`, `GET /v1/balances`, `GET /v1/virtual-account`, `POST /v1/transfers` | done |
 | `POST /v1/dev/simulate-deposit`, `POST /v1/dev/fund` (non-production) | done, for local testing |
 | Reconciler: ledger nets to zero, cached balances match postings | done |
-| Swaps: `POST /v1/swaps/quotes`, `POST /v1/swaps`; funds held while the order is out, settled or released after | done, verified with real sandbox trades |
+| Swaps: `POST /v1/swaps/quotes` (`side: "pay"` or `"get"` to fix either amount), `POST /v1/swaps`; funds held while the order is out, settled or released after | done, verified with real sandbox trades in both modes |
 | Prices: `GET /v1/prices` (indicative, display only) and per-user display currency | done |
 | Payouts: countries, per-rail recipient forms, account lookup, quote, send, status, saved recipients; funds held until the rail confirms | done, verified with sandbox payouts to a Nigerian bank and Ghanaian mobile money |
 | Crypto: networks, per-user deposit address per network, deposits by webhook and sweep, withdrawals with fee preview | done; payload shapes taken from real sandbox webhooks, flows tested against a mock |
 | Activity: one feed over deposits, in-app sends, swaps, payouts and crypto, with filters and a detail view | done |
 | People: recent recipients and tag-prefix search for sending | done |
-| Reconciliation: daily `reconciliation_reports` row per asset comparing the ledger with Bitnob's balances | done; per-transaction matching is not built |
-| App: phone + OTP, onboarding (name, email, date of birth, BVN, tag), Home, Add money, Swap review, Send by tag, Send to bank or mobile money, Receive and send crypto, Activity and transaction detail, Profile | done |
+| Reconciliation: daily `reconciliation_reports` row per asset, and `reconciliation_transactions` matching Bitnob's recent transactions to ledger records | done; covers Bitnob's most recent page, not full history |
+| Transaction PIN (bcrypt, 5-try lockout) required on transfers, swaps, payouts and crypto sends; Face ID or fingerprint in the app | done |
+| Limits: daily and single-transaction caps, a cap on sends per day, and a lower cap on external sends for new accounts (`LIMIT_*`) | done; the amounts are placeholders |
+| Recipient screening on payouts against `screening_blocklist` (`make block NAME=...`) | a hook and a local list only; not sanctions screening |
+| Push notifications: outbox written with each money movement, sent by the worker through Expo | done; needs an EAS project id and a real device to deliver |
+| Closed beta: `BETA_INVITE_ONLY=true` admits only phones in `beta_invites` (`make invite PHONE=...`) | done |
+| Payout currencies limited to `PAYOUT_CURRENCIES` (NGN, GHS, KES, RWF, XOF, XAF, UGX, GMD) | done |
+| Virtual dollar card: `GET /v1/card`, `POST /v1/card/kyc`, `POST /v1/card`, `/fund`, `/withdraw`, `/reveal`, `/lock`, `GET /v1/card/transactions`; loaded from the user's USDT or USDC, card number and CVV fetched on demand and never stored | built and tested against a mock; not issued in the sandbox yet (needs company USDC), fees (`CARD_*_MICRO_USD`) are placeholders |
+| App: phone + OTP, onboarding (name, email, date of birth, BVN, tag), Home, Add money, Swap (type either the amount you pay or the amount you get, flip, inline keypad), Send by tag with editable amount, Send to bank or mobile money (type what you send or what they get), Card tab (setup, load, withdraw, details, lock), Receive and send crypto, Activity and transaction detail, Profile | done |
 
 Notes from the sandbox:
 
@@ -91,8 +98,8 @@ Notes from the sandbox:
   success status, so onboarding compares the returned email with the one sent.
 - We never store the BVN: `kyc_records.id_reference` is an HMAC of it under
   `KYC_HASH_KEY`, which is enough to refuse the same BVN twice.
-- Every swap direction is one Bitnob "sell" quote with the amount the user
-  gives up as `quantity`. Quotes last about 30 seconds on NGN pairs and 5
+- A swap is one Bitnob quote: "sell" with the amount the user gives up as
+  `quantity`, or "buy" with the amount they receive when they fix that side. Quotes last about 30 seconds on NGN pairs and 5
   minutes on crypto-only pairs. Orders filled immediately in every test.
 - Bitnob checks our own balance with them when quoting, so a swap out of an
   asset we are not pre-funded in fails with "insufficient balance".

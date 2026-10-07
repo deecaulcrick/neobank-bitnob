@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ActivityRow } from '../../components/ActivityRow';
 import { Avatar } from '../../components/Avatar';
+import { CardVisual } from '../../components/CardVisual';
 import { Sky } from '../../components/Sky';
 import { Button, styles, useStatusBar } from '../../components/ui';
 import { api, type ActivityItem } from '../../lib/api';
@@ -55,28 +56,14 @@ export default function Home() {
         <Avatar tag={me?.tag} />
       </View>
 
-      {/* Identity strip tucked behind the sheet. */}
-      <View
-        style={[
-          styles.row,
-          {
-            marginHorizontal: space.md,
-            marginTop: space.md,
-            padding: space.md,
-            paddingBottom: space.md + radius.sheet,
-            marginBottom: -radius.sheet,
-            backgroundColor: sky === 'day' ? colors.onDayWash : colors.onNightWash,
-            borderTopLeftRadius: radius.lg,
-            borderTopRightRadius: radius.lg,
-          },
-        ]}>
-        <View style={{ backgroundColor: 'rgba(255, 255, 255, 0.16)', borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 8 }}>
-          <Text style={{ color: colors.white, fontSize: 14, fontWeight: weight.medium }}>Tier {me?.kyc_tier ?? 0}</Text>
-        </View>
-        <Text style={{ color: colors.white, fontSize: 17, fontWeight: weight.medium, opacity: 0.95 }}>
-          {me?.tag ? `@${me.tag}` : ''}
-        </Text>
-      </View>
+      {/* The card, tucked behind the sheet. Tap it to open the Card tab. */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Your card"
+        onPress={() => router.navigate('/card')}
+        style={{ marginHorizontal: space.lg, marginTop: space.sm, height: 78 + radius.sheet, marginBottom: -radius.sheet }}>
+        <CardVisual tag={me?.tag} compact />
+      </Pressable>
 
       <ScrollView
         style={{ flex: 1, backgroundColor: colors.sheet, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet }}
@@ -134,7 +121,12 @@ export default function Home() {
                       : ASSET_BLURB[b.asset]}
                 </Text>
               </View>
-              <Button label="Swap" variant="primary" style={{ height: 44 }} onPress={() => router.navigate('/pay')} />
+              <Button
+                label="Swap"
+                variant="primary"
+                style={{ height: 44 }}
+                onPress={() => router.push({ pathname: '/swap', params: { from: b.asset } })}
+              />
             </View>
           ))}
 

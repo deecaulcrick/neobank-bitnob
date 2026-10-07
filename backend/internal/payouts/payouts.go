@@ -23,6 +23,7 @@ import (
 	"github.com/deecaulcrick/neobank/backend/internal/bitnob"
 	"github.com/deecaulcrick/neobank/backend/internal/ledger"
 	"github.com/deecaulcrick/neobank/backend/internal/money"
+	"github.com/deecaulcrick/neobank/backend/internal/notify"
 )
 
 type Service struct {
@@ -31,6 +32,14 @@ type Service struct {
 	// FeeBps is our fee, in basis points of what Bitnob takes for the payout.
 	FeeBps int64
 	Log    *slog.Logger
+	// Currencies we pay out in; corridors in any other currency are hidden.
+	// Empty means no restriction.
+	Currencies []string
+	// Check, when set, enforces the user's limits just before funds are held.
+	Check func(ctx context.Context, userID uuid.UUID, asset money.Asset, amount int64) error
+	// Screen, when set, vets the recipient's name. A blocked recipient is
+	// refused before anything is reserved.
+	Screen func(ctx context.Context, name string) (result string, blocked bool, err error)
 
 	mu        sync.Mutex
 	countries cached
@@ -74,7 +83,20 @@ type Country struct {
 	Corridors []Corridor `json:"corridors"`
 }
 
-// Countries is the live corridor list, trimmed to the rails we can serve.
+func (s *Service) allowed(currency string) bool {
+	if len(s.Currencies) == 0 {
+		return true
+	}
+	for _, c := range s.Currencies {
+		if strings.EqualFold(c, currency) {
+			return true
+		}
+	}
+	return false
+}
+
+// Countries is the live corridor list, trimmed to the currencies and rails
+// we serve.
 func (s *Service) Countries(ctx context.Context) ([]Country, error) {
 	raw, err := s.cachedFetch(ctx, "", func() (json.RawMessage, error) { return s.Bitnob.SupportedCountries(ctx) })
 	if err != nil {
@@ -100,6 +122,9 @@ func (s *Service) Countries(ctx context.Context) ([]Country, error) {
 	for _, c := range body.Data.Countries {
 		country := Country{Code: c.Code, Name: c.Name, Flag: c.Flag}
 		for _, k := range c.Corridors {
+			if !s.allowed(k.Currency) {
+				continue
+			}
 			var rails []string
 			for _, r := range k.DestinationTypes {
 				if supportedRails[r] {
@@ -252,6 +277,9 @@ func (s *Service) CreateQuote(ctx context.Context, userID uuid.UUID, in QuoteInp
 	in.Country, in.ToCurrency = strings.ToUpper(in.Country), strings.ToUpper(in.ToCurrency)
 	if !countryCode.MatchString(in.Country) || !currencyCode.MatchString(in.ToCurrency) {
 		return Quote{}, &ValidationError{"Pick a destination."}
+	}
+	if !s.allowed(in.ToCurrency) {
+		return Quote{}, &ValidationError{"We don't send " + in.ToCurrency + " yet."}
 	}
 	if (in.Amount > 0) == (in.SettlementAmount != "") {
 		return Quote{}, &ValidationError{"Enter an amount."}
@@ -406,8 +434,18 @@ func (s *Service) Send(ctx context.Context, userID uuid.UUID, in SendInput) (Pay
 	if !reasons[in.PaymentReason] {
 		in.PaymentReason = "family_support"
 	}
-	// TODO: sanctions and name screening on the beneficiary before sending
-	// (spec: "Fraud and risk controls"), plus velocity limits and new-account holds.
+	screening := ""
+	if s.Screen != nil {
+		result, blocked, err := s.Screen(ctx, b.AccountName)
+		if err != nil {
+			return Payout{}, err
+		}
+		if blocked {
+			s.Log.Warn("payout recipient blocked by screening", "user", userID, "result", result)
+			return Payout{}, &ValidationError{"We can't send to this recipient."}
+		}
+		screening = result
+	}
 
 	var (
 		p             = Payout{ID: uuid.New(), Beneficiary: b.AccountName, CreatedAt: time.Now()}
@@ -439,6 +477,11 @@ func (s *Service) Send(ctx context.Context, userID uuid.UUID, in SendInput) (Pay
 		if time.Until(expiresAt) < 5*time.Second {
 			return ErrQuoteExpired
 		}
+		if s.Check != nil {
+			if err := s.Check(ctx, userID, p.FromAsset, p.FromAmount); err != nil {
+				return err
+			}
+		}
 		if _, err := tx.Exec(ctx, `update quotes set consumed_at = now() where id = $1`, in.QuoteID); err != nil {
 			return err
 		}
@@ -446,9 +489,9 @@ func (s *Service) Send(ctx context.Context, userID uuid.UUID, in SendInput) (Pay
 		details, _ := json.Marshal(b.Fields)
 		var beneficiaryID uuid.UUID
 		if err := tx.QueryRow(ctx,
-			`insert into beneficiaries (user_id, country, currency, rail, display_name, details)
-			 values ($1, $2, $3, $4, $5, $6) returning id`,
-			userID, country, p.ToCurrency, b.Rail, b.AccountName, details,
+			`insert into beneficiaries (user_id, country, currency, rail, display_name, details, screening_result, screened_at)
+			 values ($1, $2, $3, $4, $5, $6, nullif($7, ''), case when $7 = '' then null else now() end) returning id`,
+			userID, country, p.ToCurrency, b.Rail, b.AccountName, details, screening,
 		).Scan(&beneficiaryID); err != nil {
 			return err
 		}
@@ -605,7 +648,26 @@ func FinishTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, status, reason strin
 		     failure_reason = nullif($4, ''), raw = coalesce(nullif($5::jsonb, 'null'), raw)
 		 where id = $1`,
 		id, status, res.EntryID, reason, raw)
-	return err
+	if err != nil {
+		return err
+	}
+	var (
+		name     string
+		currency string
+		settles  int64
+	)
+	if err := tx.QueryRow(ctx,
+		`select b.display_name, q.to_currency, q.to_amount
+		 from payouts p join quotes q on q.id = p.quote_id join beneficiaries b on b.id = p.beneficiary_id
+		 where p.id = $1`, id).Scan(&name, &currency, &settles); err != nil {
+		return err
+	}
+	if status == "success" {
+		return notify.Queue(ctx, tx, userID, "Delivered",
+			fmt.Sprintf("%s reached %s.", money.DisplayFiat(currency, settles), name))
+	}
+	return notify.Queue(ctx, tx, userID, "Payout returned",
+		fmt.Sprintf("Your payout to %s didn't complete. %s is back in your balance.", name, money.Display(asset, total)))
 }
 
 // ApplyWebhook handles the payouts.* events. It keys off the event name, not

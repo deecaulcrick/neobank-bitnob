@@ -409,11 +409,33 @@ type Transaction struct {
 	Amount        string `json:"amount"`
 	Fee           string `json:"fee"`
 	Reference     string `json:"reference"`
+	TradeID       string `json:"trade_id"`
 	Metadata      struct {
-		Address string `json:"address"`
-		Chain   string `json:"chain"`
-		TxHash  string `json:"tx_hash"`
+		Address       string `json:"address"`
+		Chain         string `json:"chain"`
+		TxHash        string `json:"tx_hash"`
+		PayoutID      string `json:"payout_id"`
+		TransactionID string `json:"transaction_id"`
+		ProviderTxID  string `json:"provider_tx_id"`
+		Reference     string `json:"reference"`
 	} `json:"metadata"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Keys are the identifiers this movement may be known by on our side: its
+// own id, the reference we or Bitnob gave it, and the ids of the payout,
+// trade or deposit behind it.
+func (t Transaction) Keys() []string {
+	var keys []string
+	for _, k := range []string{
+		t.TransactionID, t.Reference, t.TradeID,
+		t.Metadata.PayoutID, t.Metadata.TransactionID, t.Metadata.ProviderTxID, t.Metadata.Reference,
+	} {
+		if k != "" {
+			keys = append(keys, k)
+		}
+	}
+	return keys
 }
 
 // Transactions lists the most recent movements, newest first.

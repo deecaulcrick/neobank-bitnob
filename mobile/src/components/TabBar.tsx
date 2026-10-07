@@ -1,4 +1,4 @@
-import { ArrowLeftRight, Clock, Landmark } from 'lucide-react-native';
+import { ArrowLeftRight, Clock, CreditCard, Landmark } from 'lucide-react-native';
 import type { ComponentProps } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -56,6 +56,8 @@ export function TabBar({ state, descriptors, navigation }: TabBarProps) {
                   )
                 ) : route.name === 'activity' ? (
                   <Clock size={26} strokeWidth={2} color={colors.ink} />
+                ) : route.name === 'card' ? (
+                  <CreditCard size={26} strokeWidth={2} color={colors.ink} />
                 ) : (
                   <ArrowLeftRight size={26} strokeWidth={2} color={colors.ink} />
                 )}
@@ -80,7 +82,7 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   barOnAccent: { backgroundColor: 'transparent' },
-  item: { height: 48, minWidth: 92, paddingHorizontal: 18, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
+  item: { height: 48, minWidth: 68, paddingHorizontal: 14, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   balance: { color: colors.ink, fontSize: 19, fontWeight: weight.semibold },
   itemFocused: { backgroundColor: colors.sheet },
   itemFocusedOnAccent: { backgroundColor: colors.onAccentWash },

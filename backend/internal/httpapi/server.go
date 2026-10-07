@@ -2,6 +2,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -13,8 +14,10 @@ import (
 	"github.com/deecaulcrick/neobank/backend/internal/activity"
 	"github.com/deecaulcrick/neobank/backend/internal/auth"
 	"github.com/deecaulcrick/neobank/backend/internal/bitnob"
+	"github.com/deecaulcrick/neobank/backend/internal/cards"
 	"github.com/deecaulcrick/neobank/backend/internal/config"
 	"github.com/deecaulcrick/neobank/backend/internal/crypto"
+	"github.com/deecaulcrick/neobank/backend/internal/limits"
 	"github.com/deecaulcrick/neobank/backend/internal/payouts"
 	"github.com/deecaulcrick/neobank/backend/internal/prices"
 	"github.com/deecaulcrick/neobank/backend/internal/swaps"
@@ -30,6 +33,8 @@ type Server struct {
 	Payouts  *payouts.Service
 	Crypto   *crypto.Service
 	Activity *activity.Service
+	Limits   *limits.Service
+	Cards    *cards.Service
 	Verifier *auth.Verifier
 	Webhooks http.Handler
 	Log      *slog.Logger
@@ -50,6 +55,9 @@ func (s *Server) Routes() http.Handler {
 	authed("GET /v1/me", s.getMe)
 	authed("PUT /v1/me/tag", s.setTag)
 	authed("PUT /v1/me/display-currency", s.setDisplayCurrency)
+	authed("PUT /v1/me/pin", s.setPIN)
+	authed("GET /v1/limits", s.getLimits)
+	authed("POST /v1/devices", s.registerDevice)
 	authed("GET /v1/balances", s.getBalances)
 	authed("POST /v1/onboarding/kyc", s.submitKYC)
 	authed("GET /v1/virtual-account", s.getVirtualAccount)
@@ -74,6 +82,16 @@ func (s *Server) Routes() http.Handler {
 	authed("POST /v1/crypto/withdrawals/preview", s.cryptoPreview)
 	authed("POST /v1/crypto/withdrawals", s.cryptoWithdraw)
 
+	// Virtual card
+	authed("GET /v1/card", s.getCard)
+	authed("POST /v1/card/kyc", s.cardKYC)
+	authed("POST /v1/card", s.createCard)
+	authed("POST /v1/card/fund", s.moveCard("fund"))
+	authed("POST /v1/card/withdraw", s.moveCard("withdraw"))
+	authed("POST /v1/card/reveal", s.revealCard)
+	authed("POST /v1/card/lock", s.lockCard)
+	authed("GET /v1/card/transactions", s.cardTransactions)
+
 	// M5 — social
 	authed("POST /v1/transfers", s.createTransfer)
 	authed("GET /v1/people", s.findPeople)
@@ -87,7 +105,18 @@ func (s *Server) Routes() http.Handler {
 		authed("POST /v1/dev/simulate-deposit", s.devSimulateDeposit)
 	}
 
-	return s.logRequests(mux)
+	return s.logRequests(deadline(mux))
+}
+
+// deadline bounds every request. Without it a query on a dead connection
+// would hang for as long as the client cared to wait; with it the query is
+// cancelled, the connection discarded and the caller told to retry.
+func deadline(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 40*time.Second)
+		defer cancel()
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 func (s *Server) logRequests(next http.Handler) http.Handler {
@@ -117,6 +146,11 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// writeProblem is writeError with a machine-readable code the app branches on.
+func writeProblem(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg, "code": code})
 }
 
 func readJSON(w http.ResponseWriter, r *http.Request, dst any) bool {

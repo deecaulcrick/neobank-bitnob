@@ -2,9 +2,11 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 
+import { AmountField } from '../components/AmountField';
 import { Button, Screen, styles } from '../components/ui';
 import { api, ApiError, type PayoutQuote } from '../lib/api';
-import { formatCurrency, formatMinor, type Asset } from '../lib/money';
+import { formatCurrency, formatMinor, minorToInput, type Asset } from '../lib/money';
+import { Cancelled, usePin } from '../lib/pin';
 import { refreshBalances } from '../lib/useBalances';
 import { colors, space } from '../theme';
 
@@ -33,6 +35,13 @@ export default function PayoutReview() {
     fields: string;
     reason: string;
   }>();
+  // The amount starts as typed on the keypad and can be changed here, e.g.
+  // when it turns out to be under the corridor's minimum.
+  const [asset, setAsset] = useState<Asset>(p.asset);
+  const [amount, setAmount] = useState(p.amount);
+  // Set when the user types exactly what the recipient should get instead.
+  const [receive, setReceive] = useState('');
+  const { withPin } = usePin();
   const [quote, setQuote] = useState<PayoutQuote | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -45,7 +54,12 @@ export default function PayoutReview() {
     setLoading(true);
     setError('');
     try {
-      const q = await api.payoutQuote({ country: p.country, currency: p.currency, from_asset: p.asset, amount: p.amount });
+      const q = await api.payoutQuote({
+        country: p.country,
+        currency: p.currency,
+        from_asset: asset,
+        ...(receive ? { settlement_amount: receive } : { amount }),
+      });
       if (id !== request.current) return;
       setQuote(q);
       setSecondsLeft(Math.max(0, Math.round((new Date(q.expires_at).getTime() - Date.now()) / 1000)));
@@ -56,7 +70,7 @@ export default function PayoutReview() {
     } finally {
       if (id === request.current) setLoading(false);
     }
-  }, [p.country, p.currency, p.asset, p.amount]);
+  }, [p.country, p.currency, asset, amount, receive]);
 
   useEffect(() => {
     fetchQuote();
@@ -77,11 +91,16 @@ export default function PayoutReview() {
     setSubmitting(true);
     setError('');
     try {
-      const payout = await api.sendPayout({
-        quote_id: quote.id,
-        beneficiary: { rail: p.rail, account_name: p.name, fields: JSON.parse(p.fields) },
-        payment_reason: p.reason,
-      });
+      const payout = await withPin((pin) =>
+        api.sendPayout(
+          {
+            quote_id: quote.id,
+            beneficiary: { rail: p.rail, account_name: p.name, fields: JSON.parse(p.fields) },
+            payment_reason: p.reason,
+          },
+          pin,
+        ),
+      );
       refreshBalances();
       const what = `${formatCurrency(payout.to_currency, payout.to_amount)} to ${payout.beneficiary_name}`;
       router.replace({
@@ -92,6 +111,7 @@ export default function PayoutReview() {
             : { message: `Sending ${what}. If it doesn't arrive, the money goes back to your balance.`, pending: '1' },
       });
     } catch (e) {
+      if (e instanceof Cancelled) return;
       setError(e instanceof Error ? e.message : 'Something went wrong');
       refreshBalances();
       if (e instanceof ApiError && (e.status === 410 || e.status === 409)) fetchQuote();
@@ -103,25 +123,44 @@ export default function PayoutReview() {
   return (
     <Screen sheet="Review" style={{ justifyContent: 'space-between' }}>
       <View style={{ gap: space.md }}>
-        <View style={[styles.card, { gap: space.md, minHeight: 250, justifyContent: 'center' }]}>
+        <View style={{ gap: space.sm }}>
+          <View>
+            <Text style={styles.muted}>You send{receive ? ' about' : ''}</Text>
+            <AmountField
+              asset={asset}
+              amount={receive ? (quote ? minorToInput(quote.from_asset, quote.from_amount) : '') : amount}
+              placeholder="…"
+              onChange={(a, v) => {
+                setAsset(a);
+                setAmount(v);
+                setReceive('');
+              }}
+            />
+          </View>
+          <View>
+            <Text style={styles.muted}>{p.name} gets{receive ? ' exactly' : ''}</Text>
+            <AmountField
+              asset={asset}
+              fiat={p.currency}
+              fontSize={28}
+              amount={receive || (quote ? (quote.to_amount / 100).toFixed(2) : '')}
+              placeholder="…"
+              onChange={(_, v) => setReceive(v)}
+            />
+          </View>
+        </View>
+        <View style={[styles.card, { gap: space.md, minHeight: 170, justifyContent: 'center' }]}>
           {loading && !quote ? (
             <ActivityIndicator color={colors.ink} />
           ) : quote ? (
             <View style={{ opacity: expired ? 0.35 : 1, gap: space.md }}>
-              <View>
-                <Text style={styles.muted}>{p.name} gets</Text>
-                <Text style={[styles.amount, { fontSize: 40, letterSpacing: -1 }]} adjustsFontSizeToFit numberOfLines={1}>
-                  {formatCurrency(quote.to_currency, quote.to_amount)}
-                </Text>
-              </View>
-              <View style={styles.rule} />
               <Row label="You pay" value={`${formatMinor(quote.from_asset, quote.from_amount)} ${quote.from_asset}`} />
               <Row label="Fee (included)" value={formatMinor(quote.from_asset, quote.fee_amount)} />
-              <Row label="To" value={p.name} />
+              <Row label="They get" value={formatCurrency(quote.to_currency, quote.to_amount)} />
               <Text style={styles.muted}>{expired ? 'This rate has expired.' : `Rate locked for ${clock(secondsLeft)}`}</Text>
             </View>
           ) : (
-            <Text style={styles.muted}>No rate available.</Text>
+            <Text style={styles.muted}>Change the amount above to try again.</Text>
           )}
         </View>
         {!!error && <Text style={styles.error}>{error}</Text>}

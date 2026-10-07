@@ -7,31 +7,46 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    // Machine-readable reason, e.g. 'pin_wrong', 'limit', 'not_invited'.
+    public code?: string,
   ) {
     super(message);
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+// pin: the transaction PIN, sent on every request that moves money.
+async function request<T>(method: string, path: string, body?: unknown, pin?: string): Promise<T> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
 
+  // Give up after a while rather than leave a spinner turning forever.
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), 45_000);
   let res: Response;
   try {
     res = await fetch(BASE_URL + path, {
       method,
+      signal: abort.signal,
       headers: {
         Accept: 'application/json',
         ...(body ? { 'Content-Type': 'application/json' } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(pin ? { 'X-Pin': pin } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch {
-    throw new ApiError(0, "We can't reach the server. Check your connection and try again.");
+    throw new ApiError(
+      0,
+      abort.signal.aborted
+        ? 'That took too long. Check your connection and try again.'
+        : "We can't reach the server. Check your connection and try again.",
+    );
+  } finally {
+    clearTimeout(timer);
   }
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, json.error ?? 'Something went wrong');
+  if (!res.ok) throw new ApiError(res.status, json.error ?? 'Something went wrong', json.code);
   return json as T;
 }
 
@@ -44,6 +59,19 @@ export type Me = {
   last_name: string | null;
   kyc_tier: number;
   display_currency: 'NGN' | 'USD';
+  has_pin: boolean;
+};
+
+// Today's outflow against the user's limits, in kobo.
+export type Limits = {
+  daily_limit: number;
+  single_limit: number;
+  used_today: number;
+  remaining: number;
+  sends_today: number;
+  max_sends: number;
+  new_account_until: string | null;
+  new_account_daily_limit: number;
 };
 
 export type KycInput = {
@@ -152,7 +180,17 @@ export type CryptoTransfer = { id: string; status: 'pending' | 'success' | 'fail
 
 type WithdrawalInput = { asset: Asset; network: string; address: string; amount: string };
 
-export type ActivityKind = 'deposit' | 'transfer_in' | 'transfer_out' | 'swap' | 'payout' | 'crypto_in' | 'crypto_out';
+export type ActivityKind =
+  | 'deposit'
+  | 'transfer_in'
+  | 'transfer_out'
+  | 'swap'
+  | 'payout'
+  | 'crypto_in'
+  | 'crypto_out'
+  | 'card_create'
+  | 'card_fund'
+  | 'card_withdraw';
 
 export type ActivityItem = {
   id: string;
@@ -174,6 +212,48 @@ export type ActivityDetail = ActivityItem & {
 
 export type Person = { tag: string; first_name: string | null };
 
+// The user's virtual dollar card. Amounts are micro-dollars, the same unit as USDC.
+export type CardView = {
+  kyc_status: '' | 'pending' | 'approved' | 'rejected';
+  card: {
+    id: string;
+    status: 'pending' | 'active' | 'frozen';
+    brand: string;
+    last4: string;
+    name: string;
+    balance: number | null; // null when it couldn't be read just now
+  } | null;
+  creation_fee: number;
+  fund_fee: number;
+};
+
+export type CardKycInput = {
+  bvn: string;
+  line1: string;
+  city: string;
+  state: string;
+  postal_code: string;
+  occupation: string;
+  employment_status: string;
+  account_purpose: string;
+  annual_salary: string;
+  expected_monthly_volume: string;
+  accept_terms: boolean;
+};
+
+export type CardTransfer = { id: string; kind: 'create' | 'fund' | 'withdraw'; status: 'pending' | 'success' | 'failed'; amount: number; fee: number };
+
+export type CardSecrets = {
+  number: string;
+  cvv: string;
+  expiry_month: string;
+  expiry_year: string;
+  name: string;
+  billing_address: string;
+};
+
+export type CardStatement = { id: string; type: string; status: string; description: string; amount: number; created_at: string };
+
 export type Balance = { asset: Asset; available: number; pending: number; decimals: number };
 
 export const api = {
@@ -185,9 +265,11 @@ export const api = {
     request<{ display_currency: 'NGN' | 'USD' }>('PUT', '/v1/me/display-currency', { currency }),
   prices: () => request<Prices>('GET', '/v1/prices'),
   balances: () => request<{ balances: Balance[] }>('GET', '/v1/balances'),
-  swapQuote: (input: { from: Asset; to: Asset; amount: string }) =>
+  // side 'pay': amount is what you give, in `from`. side 'get': amount is
+  // exactly what you want to receive, in `to`.
+  swapQuote: (input: { from: Asset; to: Asset; amount: string; side: 'pay' | 'get' }) =>
     request<SwapQuote>('POST', '/v1/swaps/quotes', input),
-  swap: (quoteId: string) => request<SwapTrade>('POST', '/v1/swaps', { quote_id: quoteId }),
+  swap: (quoteId: string, pin: string) => request<SwapTrade>('POST', '/v1/swaps', { quote_id: quoteId }, pin),
   payoutCountries: () => request<{ countries: PayoutCountry[] }>('GET', '/v1/payouts/countries'),
   payoutCountry: (code: string) => request<PayoutCountryDetails>('GET', `/v1/payouts/countries/${code}`),
   payoutLookup: (country: string, rail: string, provider: string, account: string) =>
@@ -196,16 +278,18 @@ export const api = {
       `/v1/payouts/account-lookup?country=${country}&rail=${rail}&provider=${encodeURIComponent(provider)}&account=${encodeURIComponent(account)}`,
     ),
   beneficiaries: () => request<{ beneficiaries: SavedBeneficiary[] }>('GET', '/v1/beneficiaries'),
-  payoutQuote: (input: { country: string; currency: string; from_asset: Asset; amount: string }) =>
+  // Send either `amount` (what you pay, in from_asset) or `settlement_amount`
+  // (exactly what the recipient gets, in `currency`).
+  payoutQuote: (input: { country: string; currency: string; from_asset: Asset; amount?: string; settlement_amount?: string }) =>
     request<PayoutQuote>('POST', '/v1/payouts/quotes', input),
-  sendPayout: (input: { quote_id: string; beneficiary: PayoutBeneficiary; payment_reason: string }) =>
-    request<Payout>('POST', '/v1/payouts', input),
+  sendPayout: (input: { quote_id: string; beneficiary: PayoutBeneficiary; payment_reason: string }, pin: string) =>
+    request<Payout>('POST', '/v1/payouts', input, pin),
   cryptoNetworks: (asset: Asset) => request<{ networks: CryptoNetwork[] }>('GET', `/v1/crypto/networks?asset=${asset}`),
   cryptoAddress: (asset: Asset, network: string) =>
     request<{ address: string }>('POST', '/v1/crypto/addresses', { asset, network }),
   cryptoPreview: (input: WithdrawalInput) => request<WithdrawalPreview>('POST', '/v1/crypto/withdrawals/preview', input),
-  cryptoWithdraw: (input: WithdrawalInput & { idempotency_key: string }) =>
-    request<CryptoTransfer>('POST', '/v1/crypto/withdrawals', input),
+  cryptoWithdraw: (input: WithdrawalInput & { idempotency_key: string }, pin: string) =>
+    request<CryptoTransfer>('POST', '/v1/crypto/withdrawals', input, pin),
   people: (query: string) => request<{ people: Person[] }>('GET', `/v1/people?q=${encodeURIComponent(query)}`),
   activity: (filter: { asset?: string; kinds?: string[]; before?: string } = {}) => {
     const q = [
@@ -216,8 +300,21 @@ export const api = {
     return request<{ items: ActivityItem[] }>('GET', `/v1/activity${q.length ? '?' + q.join('&') : ''}`);
   },
   activityItem: (id: string) => request<ActivityDetail>('GET', `/v1/activity/${encodeURIComponent(id)}`),
-  transfer: (input: { to_tag: string; asset: Asset; amount: string; idempotency_key: string }) =>
-    request<{ entry_id: string; status: string }>('POST', '/v1/transfers', input),
+  card: () => request<CardView>('GET', '/v1/card'),
+  cardKyc: (input: CardKycInput) => request<{ kyc_status: string }>('POST', '/v1/card/kyc', input),
+  createCard: (amount: string, key: string, pin: string) =>
+    request<CardTransfer>('POST', '/v1/card', { amount, idempotency_key: key }, pin),
+  moveCard: (kind: 'fund' | 'withdraw', amount: string, key: string, pin: string) =>
+    request<CardTransfer>('POST', `/v1/card/${kind}`, { amount, idempotency_key: key }, pin),
+  revealCard: (pin: string) => request<CardSecrets>('POST', '/v1/card/reveal', undefined, pin),
+  lockCard: (locked: boolean) => request<{ status: 'active' | 'frozen' }>('POST', '/v1/card/lock', { locked }),
+  cardTransactions: () => request<{ transactions: CardStatement[] }>('GET', '/v1/card/transactions'),
+  transfer: (input: { to_tag: string; asset: Asset; amount: string; idempotency_key: string }, pin: string) =>
+    request<{ entry_id: string; status: string }>('POST', '/v1/transfers', input, pin),
+  setPin: (pin: string, currentPin?: string) =>
+    request<{ has_pin: boolean }>('PUT', '/v1/me/pin', { pin, current_pin: currentPin ?? '' }),
+  limits: () => request<Limits>('GET', '/v1/limits'),
+  registerDevice: (token: string, platform: string) => request('POST', '/v1/devices', { token, platform }),
   // Development only: pays NGN 1,000 in through the Bitnob sandbox.
   devSimulateDeposit: () => request('POST', '/v1/dev/simulate-deposit'),
   // Development only: credits a fake deposit.

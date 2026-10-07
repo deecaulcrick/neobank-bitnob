@@ -19,12 +19,15 @@ func TestToMinorTruncates(t *testing.T) {
 		{money.NGN, "1000", 100_000},
 	}
 	for _, c := range cases {
-		got, err := toMinor(c.asset, c.in)
+		got, err := toMinor(c.asset, c.in, false)
 		if err != nil || got != c.want {
 			t.Errorf("toMinor(%s, %q) = %d, %v; want %d", c.asset, c.in, got, err, c.want)
 		}
 	}
-	if _, err := toMinor(money.NGN, "-1"); err == nil {
+	if up, _ := toMinor(money.NGN, "4118.991", true); up != 411_900 {
+		t.Errorf("round up = %d, want 411900", up)
+	}
+	if _, err := toMinor(money.NGN, "-1", false); err == nil {
 		t.Error("negative amount accepted")
 	}
 }
