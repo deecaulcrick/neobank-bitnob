@@ -9,3 +9,6 @@ backend/bin/
 # supabase cli
 supabase/.branches/
 supabase/.temp/
+
+# private working notes (the pre-public README)
+NOTES.local.md
