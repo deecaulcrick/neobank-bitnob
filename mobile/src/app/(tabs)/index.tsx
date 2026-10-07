@@ -139,7 +139,7 @@ export default function Home() {
                 </Pressable>
               </View>
               {recent.map((item) => (
-                <ActivityRow key={item.id} item={item} />
+                <ActivityRow key={item.id} item={item} dated />
               ))}
             </View>
           )}

@@ -7,13 +7,20 @@ export const colors = {
   ink: '#0B0D0C',
   inkMuted: '#6B716C',
   line: '#E2E3DE',
-  accent: '#f8e347',
-  // accent: '#B6F36A',
+  accent: '#B6F36A',
   onAccentWash: 'rgba(11, 13, 12, 0.09)', // buttons and chips drawn on the accent
   onNightWash: 'rgba(255, 255, 255, 0.1)',
   onDayWash: 'rgba(8, 32, 84, 0.26)', // the same strip over the bright day sky
   white: '#FFFFFF',
   danger: '#D4372C',
+  // Activity: a soft wash behind each kind of movement, and the ink drawn on it.
+  positive: '#17784C', // money in
+  inWash: '#DDF2E5',
+  outWash: '#EDEDE9',
+  swapWash: '#FBF0A1',
+  cardWash: '#E4E7FB',
+  cardInk: '#3A45B5',
+  dangerWash: '#FBE4E1',
 };
 
 export const space = { xs: 4, sm: 8, md: 16, lg: 24, xl: 40 };
