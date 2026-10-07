@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/deecaulcrick/neobank/backend/internal/accounts"
+	"github.com/deecaulcrick/neobank/backend/internal/activity"
 	"github.com/deecaulcrick/neobank/backend/internal/auth"
 	"github.com/deecaulcrick/neobank/backend/internal/bitnob"
 	"github.com/deecaulcrick/neobank/backend/internal/config"
@@ -28,6 +29,7 @@ type Server struct {
 	Prices   *prices.Service
 	Payouts  *payouts.Service
 	Crypto   *crypto.Service
+	Activity *activity.Service
 	Verifier *auth.Verifier
 	Webhooks http.Handler
 	Log      *slog.Logger
@@ -74,8 +76,9 @@ func (s *Server) Routes() http.Handler {
 
 	// M5 — social
 	authed("POST /v1/transfers", s.createTransfer)
-	authed("GET /v1/activity", notImplemented)
-	authed("GET /v1/activity/{id}", notImplemented)
+	authed("GET /v1/people", s.findPeople)
+	authed("GET /v1/activity", s.listActivity)
+	authed("GET /v1/activity/{id}", s.getActivity)
 
 	if s.Cfg.Env != "production" {
 		// Credits a fake deposit so the app is usable before Bitnob is wired up.
@@ -124,10 +127,6 @@ func readJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 		return false
 	}
 	return true
-}
-
-func notImplemented(w http.ResponseWriter, _ *http.Request) {
-	writeError(w, http.StatusNotImplemented, "not implemented yet")
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {

@@ -3,9 +3,12 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
+	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/deecaulcrick/neobank/backend/internal/bitnob"
@@ -68,8 +71,86 @@ func (j *Jobs) Reconcile(ctx context.Context) error {
 		j.Log.Error("RECONCILIATION: cached balances drifted from postings", "accounts", drifted)
 	}
 
-	// 3. TODO(M5): per asset, -balance(omnibus) must equal bitnob.Balances();
-	//    every Bitnob transaction ID maps to exactly one journal entry.
+	// 3. Per asset, what the ledger says Bitnob holds for us against what
+	//    Bitnob reports. Recorded for ops; never corrected automatically.
+	if err := j.reconcileBitnob(ctx); err != nil {
+		j.Log.Error("RECONCILIATION: could not compare with Bitnob", "err", err)
+	}
 	j.Log.Info("reconciliation finished", "drifted_accounts", drifted)
+	return nil
+}
+
+// reconcileBitnob writes one reconciliation_reports row per asset. The
+// spec's identity is: user + pending + revenue (+ suspense) balances equal
+// Bitnob's balance; since the ledger nets to zero that sum is -omnibus.
+//
+// Not covered yet: matching every Bitnob transaction id to exactly one
+// journal entry.
+func (j *Jobs) reconcileBitnob(ctx context.Context) error {
+	if !j.Bitnob.Configured() {
+		return nil
+	}
+	raw, err := j.Bitnob.Balances(ctx)
+	if err != nil {
+		return err
+	}
+	var body struct {
+		Data struct {
+			Accounts []struct {
+				Currency      string `json:"currency"`
+				LedgerBalance string `json:"ledger_balance"`
+			} `json:"accounts"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return err
+	}
+	atBitnob := map[string]int64{}
+	for _, a := range body.Data.Accounts {
+		if v, err := strconv.ParseInt(a.LedgerBalance, 10, 64); err == nil {
+			atBitnob[a.Currency] = v
+		}
+	}
+
+	rows, err := j.Pool.Query(ctx,
+		`select asset::text,
+		        -coalesce(sum(balance) filter (where kind = 'omnibus'), 0)::bigint,
+		        coalesce(sum(balance) filter (where kind <> 'omnibus'), 0)::bigint
+		 from ledger_accounts group by asset order by asset`)
+	if err != nil {
+		return err
+	}
+	type line struct {
+		asset               string
+		ledger, liabilities int64
+	}
+	lines, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (line, error) {
+		var l line
+		return l, row.Scan(&l.asset, &l.ledger, &l.liabilities)
+	})
+	if err != nil {
+		return err
+	}
+	for _, l := range lines {
+		var reported *int64
+		notes := ""
+		if v, ok := atBitnob[l.asset]; ok {
+			reported = &v
+			if v != l.ledger {
+				notes = "mismatch"
+				j.Log.Error("RECONCILIATION: ledger and Bitnob disagree",
+					"asset", l.asset, "ledger", l.ledger, "bitnob", v, "difference", v-l.ledger)
+			}
+		} else {
+			notes = "Bitnob did not report this asset"
+			j.Log.Warn("RECONCILIATION: no Bitnob balance for asset", "asset", l.asset)
+		}
+		if _, err := j.Pool.Exec(ctx,
+			`insert into reconciliation_reports (asset, ledger_amount, bitnob_amount, liabilities, notes)
+			 values ($1::text::asset, $2, $3, $4, nullif($5, ''))`,
+			l.asset, l.ledger, reported, l.liabilities, notes); err != nil {
+			return err
+		}
+	}
 	return nil
 }

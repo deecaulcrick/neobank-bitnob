@@ -6,12 +6,14 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/deecaulcrick/neobank/backend/internal/accounts"
+	"github.com/deecaulcrick/neobank/backend/internal/activity"
 	"github.com/deecaulcrick/neobank/backend/internal/auth"
 	"github.com/deecaulcrick/neobank/backend/internal/crypto"
 	"github.com/deecaulcrick/neobank/backend/internal/ledger"
@@ -620,6 +622,57 @@ func (s *Server) cryptoError(w http.ResponseWriter, r *http.Request, err error) 
 	default:
 		s.fail(w, r, err)
 	}
+}
+
+// findPeople powers the send screen: recent recipients with no query, tag
+// prefix matches with one.
+func (s *Server) findPeople(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	people, err := s.Activity.People(r.Context(), u.ID, r.URL.Query().Get("q"))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"people": people})
+}
+
+// listActivity is the history feed. Filter with asset and kinds (comma
+// separated); page with before set to the last item's created_at.
+func (s *Server) listActivity(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	q := r.URL.Query()
+	f := activity.Filter{Asset: q.Get("asset")}
+	if kinds := q.Get("kinds"); kinds != "" {
+		f.Kinds = strings.Split(kinds, ",")
+	}
+	if before := q.Get("before"); before != "" {
+		t, err := time.Parse(time.RFC3339Nano, before)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid before")
+			return
+		}
+		f.Before = t
+	}
+	items, err := s.Activity.List(r.Context(), u.ID, f)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (s *Server) getActivity(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.FromContext(r.Context())
+	d, err := s.Activity.Get(r.Context(), u.ID, r.PathValue("id"))
+	if errors.Is(err, activity.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "We couldn't find that transaction.")
+		return
+	}
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, d)
 }
 
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {

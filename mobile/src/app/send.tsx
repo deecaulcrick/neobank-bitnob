@@ -1,9 +1,9 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Text, TextInput, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from 'react-native';
 
 import { Button, Screen, styles } from '../components/ui';
-import { api } from '../lib/api';
+import { api, type Person } from '../lib/api';
 import { formatInput, type Asset } from '../lib/money';
 import { colors, space } from '../theme';
 
@@ -17,6 +17,24 @@ export default function Send() {
   const idempotencyKey = useRef(`${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
   const clean = tag.trim().replace(/^@/, '').toLowerCase();
+  const [people, setPeople] = useState<Person[]>([]);
+
+  // People you've paid before, or tags matching what is typed so far.
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(
+      () =>
+        api
+          .people(clean)
+          .then((r) => !cancelled && setPeople(r.people))
+          .catch(() => {}),
+      clean ? 250 : 0,
+    );
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [clean]);
   const pretty = formatInput(asset, amount);
 
   async function send() {
@@ -64,7 +82,20 @@ export default function Send() {
           </View>
           <View style={styles.rule} />
           {!!error && <Text style={[styles.error, { marginTop: space.sm }]}>{error}</Text>}
-          {/* TODO(M5): recent tags and search. */}
+          {people.length > 0 && !people.some((p) => p.tag === clean) && (
+            <View style={{ marginTop: space.sm }}>
+              {!clean && <Text style={[styles.muted, { marginTop: space.sm }]}>Recent</Text>}
+              {people.slice(0, 5).map((p) => (
+                <Pressable
+                  key={p.tag}
+                  onPress={() => setTag(`@${p.tag}`)}
+                  style={({ pressed }) => [styles.row, { paddingVertical: 12 }, pressed && { opacity: 0.5 }]}>
+                  <Text style={styles.body}>@{p.tag}</Text>
+                  {!!p.first_name && <Text style={styles.muted}>{p.first_name}</Text>}
+                </Pressable>
+              ))}
+            </View>
+          )}
         </View>
 
         <View style={{ gap: space.sm }}>

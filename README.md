@@ -75,13 +75,15 @@ is signed: credit > 0, debit < 0, and each entry sums to zero per asset
 | Deposits: `virtual_account.deposit.success` webhook, plus a once-a-minute poll for missed ones | done; the webhook path is tested with a hand-built payload only |
 | `GET /v1/me`, `PUT /v1/me/tag`, `GET /v1/balances`, `GET /v1/virtual-account`, `POST /v1/transfers` | done |
 | `POST /v1/dev/simulate-deposit`, `POST /v1/dev/fund` (non-production) | done, for local testing |
-| Reconciler: ledger nets to zero, cached balances match postings | done; Bitnob comparison is a TODO |
+| Reconciler: ledger nets to zero, cached balances match postings | done |
 | Swaps: `POST /v1/swaps/quotes`, `POST /v1/swaps`; funds held while the order is out, settled or released after | done, verified with real sandbox trades |
 | Prices: `GET /v1/prices` (indicative, display only) and per-user display currency | done |
 | Payouts: countries, per-rail recipient forms, account lookup, quote, send, status, saved recipients; funds held until the rail confirms | done, verified with sandbox payouts to a Nigerian bank and Ghanaian mobile money |
 | Crypto: networks, per-user deposit address per network, deposits by webhook and sweep, withdrawals with fee preview | done; payload shapes taken from real sandbox webhooks, flows tested against a mock |
-| Activity | routes return 501; screen is a placeholder |
-| App: phone + OTP, onboarding (name, email, date of birth, BVN, tag), Home, Add money, Swap review, Send by tag, Send to bank or mobile money, Receive and send crypto, Profile | done |
+| Activity: one feed over deposits, in-app sends, swaps, payouts and crypto, with filters and a detail view | done |
+| People: recent recipients and tag-prefix search for sending | done |
+| Reconciliation: daily `reconciliation_reports` row per asset comparing the ledger with Bitnob's balances | done; per-transaction matching is not built |
+| App: phone + OTP, onboarding (name, email, date of birth, BVN, tag), Home, Add money, Swap review, Send by tag, Send to bank or mobile money, Receive and send crypto, Activity and transaction detail, Profile | done |
 
 Notes from the sandbox:
 

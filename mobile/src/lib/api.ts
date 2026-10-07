@@ -152,6 +152,28 @@ export type CryptoTransfer = { id: string; status: 'pending' | 'success' | 'fail
 
 type WithdrawalInput = { asset: Asset; network: string; address: string; amount: string };
 
+export type ActivityKind = 'deposit' | 'transfer_in' | 'transfer_out' | 'swap' | 'payout' | 'crypto_in' | 'crypto_out';
+
+export type ActivityItem = {
+  id: string;
+  kind: ActivityKind;
+  status: 'done' | 'pending' | 'failed';
+  asset: Asset;
+  amount: number; // signed minor units; positive is money in
+  other_currency: string | null;
+  other_amount: number | null;
+  title: string;
+  created_at: string;
+};
+
+export type ActivityDetail = ActivityItem & {
+  timeline: { label: string; at: string | null }[];
+  rows: { label: string; value: string }[];
+  reference: string;
+};
+
+export type Person = { tag: string; first_name: string | null };
+
 export type Balance = { asset: Asset; available: number; pending: number; decimals: number };
 
 export const api = {
@@ -184,6 +206,16 @@ export const api = {
   cryptoPreview: (input: WithdrawalInput) => request<WithdrawalPreview>('POST', '/v1/crypto/withdrawals/preview', input),
   cryptoWithdraw: (input: WithdrawalInput & { idempotency_key: string }) =>
     request<CryptoTransfer>('POST', '/v1/crypto/withdrawals', input),
+  people: (query: string) => request<{ people: Person[] }>('GET', `/v1/people?q=${encodeURIComponent(query)}`),
+  activity: (filter: { asset?: string; kinds?: string[]; before?: string } = {}) => {
+    const q = [
+      filter.asset && `asset=${filter.asset}`,
+      filter.kinds?.length && `kinds=${filter.kinds.join(',')}`,
+      filter.before && `before=${encodeURIComponent(filter.before)}`,
+    ].filter(Boolean);
+    return request<{ items: ActivityItem[] }>('GET', `/v1/activity${q.length ? '?' + q.join('&') : ''}`);
+  },
+  activityItem: (id: string) => request<ActivityDetail>('GET', `/v1/activity/${encodeURIComponent(id)}`),
   transfer: (input: { to_tag: string; asset: Asset; amount: string; idempotency_key: string }) =>
     request<{ entry_id: string; status: string }>('POST', '/v1/transfers', input),
   // Development only: pays NGN 1,000 in through the Bitnob sandbox.

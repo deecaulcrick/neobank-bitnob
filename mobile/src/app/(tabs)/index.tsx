@@ -1,11 +1,14 @@
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Eye, EyeOff } from 'lucide-react-native';
+import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ActivityRow } from '../../components/ActivityRow';
 import { Avatar } from '../../components/Avatar';
 import { Sky } from '../../components/Sky';
 import { Button, styles, useStatusBar } from '../../components/ui';
+import { api, type ActivityItem } from '../../lib/api';
 import { useMeState } from '../../lib/me';
 import { ASSET_BLURB, formatBalance, formatFiat, formatMinor, totalValue, valueOf } from '../../lib/money';
 import { setHideBalances, useHideBalances, useSkyMode } from '../../lib/prefs';
@@ -24,6 +27,16 @@ export default function Home() {
   const hidden = useHideBalances();
   useStatusBar('light');
   const sky = useSkyMode();
+  const [recent, setRecent] = useState<ActivityItem[]>([]);
+
+  useFocusEffect(
+    useCallback(() => {
+      api
+        .activity()
+        .then((r) => setRecent(r.items.slice(0, 4)))
+        .catch(() => {});
+    }, []),
+  );
 
   const fiat = me?.display_currency ?? 'NGN';
   const ngn = balances?.find((b) => b.asset === 'NGN');
@@ -124,6 +137,20 @@ export default function Home() {
               <Button label="Swap" variant="primary" style={{ height: 44 }} onPress={() => router.navigate('/pay')} />
             </View>
           ))}
+
+          {recent.length > 0 && (
+            <View style={[styles.card, { paddingVertical: space.sm }]}>
+              <View style={[styles.row, { paddingTop: space.sm }]}>
+                <Text style={styles.muted}>Recent</Text>
+                <Pressable onPress={() => router.navigate('/activity')} hitSlop={12}>
+                  <Text style={styles.muted}>See all</Text>
+                </Pressable>
+              </View>
+              {recent.map((item) => (
+                <ActivityRow key={item.id} item={item} />
+              ))}
+            </View>
+          )}
         </View>
       </ScrollView>
     </View>
