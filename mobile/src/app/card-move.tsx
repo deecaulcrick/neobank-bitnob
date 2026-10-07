@@ -4,7 +4,7 @@ import { Text, View } from 'react-native';
 
 import { AmountField } from '../components/AmountField';
 import { Button, Screen, styles } from '../components/ui';
-import { api, type CardView } from '../lib/api';
+import { api, newKey, type CardView } from '../lib/api';
 import { formatMinor } from '../lib/money';
 import { Cancelled, usePin } from '../lib/pin';
 import { refreshBalances } from '../lib/useBalances';
@@ -22,7 +22,7 @@ export default function CardMove() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   // One key per attempt, so a retry after a dropped response can't move money twice.
-  const key = useRef(`${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const key = useRef('');
 
   useEffect(() => {
     api.card().then(setView).catch(() => {});
@@ -35,7 +35,7 @@ export default function CardMove() {
     setLoading(true);
     setError('');
     try {
-      await withPin((pin) => api.moveCard(kind, amount, key.current, pin));
+      await withPin((pin) => api.moveCard(kind, amount, (key.current ||= newKey()), pin));
       refreshBalances();
       router.replace({
         pathname: '/success',
@@ -49,7 +49,7 @@ export default function CardMove() {
     } catch (e) {
       if (e instanceof Cancelled) return;
       setError(e instanceof Error ? e.message : 'Something went wrong');
-      key.current = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      key.current = '';
     } finally {
       setLoading(false);
     }

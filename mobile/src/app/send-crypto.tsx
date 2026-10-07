@@ -5,7 +5,7 @@ import { ActivityIndicator, KeyboardAvoidingView, Platform, Text, TextInput, Vie
 
 import { AmountField } from '../components/AmountField';
 import { Button, Chip, Screen, styles } from '../components/ui';
-import { api, type CryptoNetwork, type WithdrawalPreview } from '../lib/api';
+import { api, newKey, type CryptoNetwork, type WithdrawalPreview } from '../lib/api';
 import { formatMinor, type Asset } from '../lib/money';
 import { Cancelled, usePin } from '../lib/pin';
 import { refreshBalances } from '../lib/useBalances';
@@ -35,7 +35,7 @@ export default function SendCrypto() {
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   // One key per attempt, so a retry after a dropped response can't send twice.
-  const idempotencyKey = useRef(`${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const idempotencyKey = useRef('');
 
   useEffect(() => {
     setNetworks(null);
@@ -77,7 +77,7 @@ export default function SendCrypto() {
     try {
       const t = await withPin((pin) =>
         api.cryptoWithdraw(
-          { asset, network, address: address.trim(), amount, idempotency_key: idempotencyKey.current },
+          { asset, network, address: address.trim(), amount, idempotency_key: (idempotencyKey.current ||= newKey()) },
           pin,
         ),
       );
@@ -95,7 +95,7 @@ export default function SendCrypto() {
       setError(e instanceof Error ? e.message : 'Something went wrong');
       refreshBalances();
       // A refused withdrawal is final for that key; the next try is a new one.
-      idempotencyKey.current = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      idempotencyKey.current = '';
     } finally {
       setSending(false);
     }

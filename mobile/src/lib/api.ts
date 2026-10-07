@@ -256,6 +256,9 @@ export type CardStatement = { id: string; type: string; status: string; descript
 
 export type Balance = { asset: Asset; available: number; pending: number; decimals: number };
 
+// A fresh idempotency key. Call it from a handler, not while rendering.
+export const newKey = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
 export const api = {
   me: () => request<Me>('GET', '/v1/me'),
   setTag: (tag: string) => request<{ tag: string }>('PUT', '/v1/me/tag', { tag }),

@@ -4,7 +4,7 @@ import { KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from
 
 import { AmountField } from '../components/AmountField';
 import { Button, Screen, styles } from '../components/ui';
-import { api, type Person } from '../lib/api';
+import { api, newKey, type Person } from '../lib/api';
 import { formatInput, type Asset } from '../lib/money';
 import { Cancelled, usePin } from '../lib/pin';
 import { refreshBalances } from '../lib/useBalances';
@@ -21,7 +21,7 @@ export default function Send() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   // One key per attempt, so a retry after a dropped response can't send twice.
-  const idempotencyKey = useRef(`${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const idempotencyKey = useRef('');
 
   const clean = tag.trim().replace(/^@/, '').toLowerCase();
   const [people, setPeople] = useState<Person[]>([]);
@@ -49,7 +49,7 @@ export default function Send() {
     setError('');
     try {
       await withPin((pin) =>
-        api.transfer({ to_tag: clean, asset, amount, idempotency_key: idempotencyKey.current }, pin),
+        api.transfer({ to_tag: clean, asset, amount, idempotency_key: (idempotencyKey.current ||= newKey()) }, pin),
       );
       refreshBalances();
       router.replace({ pathname: '/success', params: { message: `You sent ${pretty} to @${clean}` } });

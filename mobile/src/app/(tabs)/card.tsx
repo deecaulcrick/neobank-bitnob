@@ -6,7 +6,7 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } 
 import { AmountField } from '../../components/AmountField';
 import { CardVisual } from '../../components/CardVisual';
 import { Button, Screen, styles } from '../../components/ui';
-import { api, type CardStatement, type CardView } from '../../lib/api';
+import { api, newKey, type CardStatement, type CardView } from '../../lib/api';
 import { formatMinor } from '../../lib/money';
 import { Cancelled, usePin } from '../../lib/pin';
 import { CARD_THEMES, setCardTheme, useCardTheme, type CardTheme } from '../../lib/prefs';
@@ -42,7 +42,7 @@ export default function CardTab() {
   const [refreshing, setRefreshing] = useState(false);
   const [load, setLoad] = useState('5');
   // One key per attempt, so a retry can't issue two cards.
-  const key = useRef(`${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const key = useRef('');
 
   const refresh = useCallback(async () => {
     try {
@@ -81,7 +81,7 @@ export default function CardTab() {
 
   const create = () =>
     run(async () => {
-      await withPin((pin) => api.createCard(load, key.current, pin));
+      await withPin((pin) => api.createCard(load, (key.current ||= newKey()), pin));
       refreshBalances();
     });
 
